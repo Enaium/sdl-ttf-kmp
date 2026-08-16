@@ -4,8 +4,9 @@ name: Test
   workflow_dispatch:
 
 # Builds every platform on the runner that can build it, publishes the
-# artifacts to Maven Local (no signing, no secrets required) and runs the
-# tests plus the example app headless:
+# artifacts to Maven Local (mirroring sdl-kmp's test workflow: the artifacts
+# are signed with the repository's PGP key) and runs the tests plus the
+# example app headless:
 #
 #   macOS ARM64 -> :sdl-ttf-kmp metadata + jvm + all Apple target klibs
 #                  (macos/ios/tvos, each with the embedded SDL_ttf static
@@ -52,9 +53,18 @@ jobs:
           # not part of the action's known-good checksum list.
           validate-wrappers: false
 
-      - name: Publish to Maven Local
+      - name: Decode signing key
+        run: |
+          echo "${{ secrets.SIGNING_KEY }}" | tr -d ' \n' | base64 -d > "$RUNNER_TEMP/signing-key.gpg"
+          ls -la "$RUNNER_TEMP/signing-key.gpg"
+          head -c 16 "$RUNNER_TEMP/signing-key.gpg" | od -c | head -2
+
+      - name: Publish all platforms to Maven Local
         run: >
           ./gradlew --no-daemon --rerun-tasks --stacktrace
+          -Psigning.keyId="${{ secrets.SIGNING_KEY_ID }}"
+          -Psigning.secretKeyRingFile="${{ runner.temp }}/signing-key.gpg"
+          -Psigning.password="${{ secrets.SIGNING_PASSWORD }}"
           :sdl-ttf-kmp:publishToMavenLocal
           :ttf-jni-jvm-darwin-aarch64:publishToMavenLocal
           :ttf-jni-jvm-darwin-x86_64:publishToMavenLocal
@@ -105,9 +115,18 @@ jobs:
           # not part of the action's known-good checksum list.
           validate-wrappers: false
 
+      - name: Decode signing key
+        run: |
+          echo "${{ secrets.SIGNING_KEY }}" | tr -d ' \n' | base64 -d > "$RUNNER_TEMP/signing-key.gpg"
+          ls -la "$RUNNER_TEMP/signing-key.gpg"
+          head -c 16 "$RUNNER_TEMP/signing-key.gpg" | od -c | head -2
+
       - name: Publish linuxX64/linuxArm64/mingwX64 klibs and the linux JNI artifacts to Maven Local
         run: >
           ./gradlew --no-daemon --rerun-tasks --stacktrace
+          -Psigning.keyId="${{ secrets.SIGNING_KEY_ID }}"
+          -Psigning.secretKeyRingFile="${{ runner.temp }}/signing-key.gpg"
+          -Psigning.password="${{ secrets.SIGNING_PASSWORD }}"
           :sdl-ttf-kmp:publishKotlinMultiplatformPublicationToMavenLocal
           :sdl-ttf-kmp:publishLinuxX64PublicationToMavenLocal
           :sdl-ttf-kmp:publishLinuxArm64PublicationToMavenLocal

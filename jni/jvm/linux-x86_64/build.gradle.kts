@@ -109,12 +109,7 @@ tasks.named<Copy>("processResources") {
 
 mavenPublishing {
     publishToMavenCentral(automaticRelease = true)
-    // Signing is only enabled when the publish workflow passes the PGP key
-    // properties (-Psigning.keyId=...); the local test workflow (publish to
-    // mavenLocal) then needs no secrets.
-    if (providers.gradleProperty("signing.keyId").isPresent) {
-        signAllPublications()
-    }
+    signAllPublications()
     coordinates(
         groupId = rootProject.group.toString(),
         artifactId = "sdl-ttf-kmp-jni-jvm-$classifier",

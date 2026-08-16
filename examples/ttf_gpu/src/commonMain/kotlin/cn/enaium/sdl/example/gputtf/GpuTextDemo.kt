@@ -59,9 +59,9 @@ import cn.enaium.sdl.SDLGPUVertexElementFormat
 import cn.enaium.sdl.SDLGPUVertexInputRate
 import cn.enaium.sdl.SDLGPUVertexInputState
 import cn.enaium.sdl.SDLGPUViewport
+import cn.enaium.sdl.SDLIO
 import cn.enaium.sdl.SDLInitFlags
 import cn.enaium.sdl.SDLKeycode
-import cn.enaium.sdl.SDLPixelFormat
 import cn.enaium.sdl.SDLWindow
 import cn.enaium.sdl.SDLWindowEventType
 import cn.enaium.sdl.SDLWindowFlags
@@ -74,8 +74,8 @@ import cn.enaium.sdl.ttf.SDLTTFStyle
 import cn.enaium.sdl.ttf.SDLTTFText
 import cn.enaium.sdl.ttf.SDLTTFTextEngine
 
-/** Vertex stride: float2 position + float2 uv. */
-private const val VERTEX_STRIDE = 16
+/** Vertex stride: float2 position + float2 uv + float4 color. */
+private const val VERTEX_STRIDE = 32
 private const val MAX_VERTICES = 16384
 private const val MAX_INDICES = 32768
 
@@ -97,8 +97,9 @@ private const val MAX_INDICES = 32768
  *
  * Coordinate notes (SDL_GPU conventions): NDC has +Y upwards, the viewport
  * origin is top-left with +Y down, and texture coordinates are top-left
- * origin with +Y down. TTF_GetGPUTextDrawData vertices are pixels with the
- * origin at the text's bottom-left and +Y upwards.
+ * origin with +Y down. TTF_GetGPUTextDrawData vertices are pixels; their
+ * origin is above the text's ascender, so the text's on-screen extent is
+ * derived from the vertex bounding box.
  */
 class GpuTextDemo(
     private val window: SDLWindow,
@@ -127,7 +128,9 @@ class GpuTextDemo(
 
     private var angle = 0.0
     private var colorIndex = 0
-    private var fontGrow = true
+    private var sdfAnimate = false
+    private var screenshotNextFrame = false
+    private var frameCount = 0
     private var running = true
 
     private val palette = listOf(
@@ -186,6 +189,7 @@ class GpuTextDemo(
             vertexAttributes = listOf(
                 SDLGPUVertexAttribute(location = 0, bufferSlot = 0, format = SDLGPUVertexElementFormat.FLOAT2, offset = 0),
                 SDLGPUVertexAttribute(location = 1, bufferSlot = 0, format = SDLGPUVertexElementFormat.FLOAT2, offset = 8),
+                SDLGPUVertexAttribute(location = 2, bufferSlot = 0, format = SDLGPUVertexElementFormat.FLOAT4, offset = 16),
             ),
         )
 
@@ -244,7 +248,8 @@ class GpuTextDemo(
         sdfFragment.close()
 
         // Surface renderers -> GPU textures (the renderer example's
-        // "surface to texture" use case).
+        // "surface to texture" use case). Shaded/LCD bake a background; the
+        // scene's clear color is used so the rectangles are invisible.
         surfaceTextures = listOf(
             Triple("Blended: alpha antialiasing", SDLColor(240, 240, 240), 0),
             Triple("Shaded: solid background", SDLColor(120, 220, 160), 1),
@@ -252,8 +257,8 @@ class GpuTextDemo(
         ).map { (label, color, mode) ->
             val f = SDLTTF.openFont(fontPath, 24f)
             val surface = when (mode) {
-                1 -> SDLTTF.renderTextShaded(f, label, color, SDLColor(20, 40, 30))
-                2 -> SDLTTF.renderTextLCD(f, label, color, SDLColor(10, 15, 25))
+                1 -> SDLTTF.renderTextShaded(f, label, color, SDLColor(18, 18, 24))
+                2 -> SDLTTF.renderTextLCD(f, label, color, SDLColor(18, 18, 24))
                 else -> SDLTTF.renderTextBlended(f, label, color)
             }
             f.close()
@@ -297,13 +302,14 @@ class GpuTextDemo(
                     !event.down -> Unit
                     event.keycode == SDLKeycode.ESCAPE -> running = false
                     event.keycode == SDLKeycode.SPACE -> {
-                        fontGrow = !fontGrow
-                        println("SDF scale animation ${if (fontGrow) "on" else "off"}")
+                        sdfAnimate = !sdfAnimate
+                        println("SDF scale animation ${if (sdfAnimate) "on" else "off"}")
                     }
                     event.keycode == SDLKeycode.C -> {
                         colorIndex = (colorIndex + 1) % palette.size
                         println("color -> ${palette[colorIndex]}")
                     }
+                    event.keycode == SDLKeycode.F12 -> screenshotNextFrame = true
                     event.keycode == SDLKeycode.UP -> {
                         font.size = (font.size + 4f).coerceAtMost(96f)
                         println("font size -> ${font.size.toInt()}pt")
@@ -317,15 +323,47 @@ class GpuTextDemo(
             }
         }
 
-        angle = (angle + 0.6) % 360.0
-        colored.color = palette[colorIndex]
+        angle = (angle + 0.4) % 360.0
 
         val cmd = device.beginCommandBuffer() ?: return running
         val windowTexture = device.acquireSwapchainTexture(cmd, window)
         val target = windowTexture?.texture
         val vw = (windowTexture?.srcRect?.width ?: window.size.x).toFloat()
         val vh = (windowTexture?.srcRect?.height ?: window.size.y).toFloat()
+
+        // Collect every draw batch, upload them into the shared buffers with
+        // copy passes (before any render pass), then draw them all in one
+        // render pass. Uploads use the frame's command buffer; the
+        // synchronous setData path is avoided (it releases its transfer
+        // buffer before the async submit completes).
+        val batches = mutableListOf<DrawBatch>()
         if (target != null) {
+            val titleScale = 1f + 0.5f * kotlin.math.sin(angle / 40.0).toFloat()
+            collectText(title, 300f, 20f, angle, titleScale, SDLColor(255, 255, 255), vw, vh)?.let { batches += it }
+            collectText(colored, 40f, 130f, 0.0, 1f, palette[colorIndex], vw, vh)?.let { batches += it }
+            collectText(cjk, 40f, 220f, 0.0, 1f, SDLColor(255, 200, 100), vw, vh)?.let { batches += it }
+            collectText(styled, 40f, 300f, 0.0, 1f, SDLColor(160, 220, 160), vw, vh)?.let { batches += it }
+            val sdfScale = if (sdfAnimate) 1f + 0.25f * kotlin.math.sin(angle / 30.0).toFloat() else 1f
+            collectText(sdfText, 40f, 360f, 0.0, sdfScale, SDLColor(255, 255, 255), vw, vh)?.let { batches += it }
+            var y = 470f
+            for ((texture, size) in surfaceTextures) {
+                batches += collectQuad(texture, 40f, y, size.first.toFloat(), size.second.toFloat(), vw, vh)
+                y += size.second + 10f
+            }
+
+            var vertexBytes = 0
+            var indexBytes = 0
+            for (batch in batches) {
+                check(cmd.uploadToBuffer(vertexBuffer, batch.vertexData, vertexBytes)) { "vertex upload failed: ${SDL.error()}" }
+                if (batch.indexData.isNotEmpty()) {
+                    check(cmd.uploadToBuffer(indexBuffer, batch.indexData, indexBytes)) { "index upload failed: ${SDL.error()}" }
+                }
+                batch.vertexByteOffset = vertexBytes
+                batch.indexByteOffset = indexBytes
+                vertexBytes += batch.vertexData.size
+                indexBytes += batch.indexData.size
+            }
+
             val pass = cmd.beginRenderPass(
                 colorTargets = listOf(
                     SDLGPUColorTargetInfo(
@@ -339,27 +377,27 @@ class GpuTextDemo(
             if (pass != null) {
                 pass.setViewport(SDLGPUViewport(0f, 0f, vw, vh))
                 pass.setScissor(0, 0, vw.toInt(), vh.toInt())
-
-                // Title: rotating + scaling text.
-                val titleScale = 1f + 0.5f * kotlin.math.sin(angle / 40.0).toFloat()
-                drawText(pass, vw, vh, title, 40f, 40f, angle, titleScale)
-                drawText(pass, vw, vh, colored, 40f, 130f, 0.0, 1f)
-                drawText(pass, vw, vh, cjk, 40f, 220f, 0.0, 1f)
-                drawText(pass, vw, vh, styled, 40f, 300f, 0.0, 1f)
-
-                // SDF text: scaling animates when SPACE enables it.
-                val sdfScale = if (fontGrow) 1f + 0.25f * kotlin.math.sin(angle / 30.0).toFloat() else 1f
-                drawText(pass, vw, vh, sdfText, 40f, 360f, 0.0, sdfScale)
-
-                // Surface-rendered samples drawn as quads.
-                var y = 470f
-                for ((texture, size) in surfaceTextures) {
-                    drawSurfaceQuad(pass, vw, vh, texture, 40f, y, size.first.toFloat(), size.second.toFloat())
-                    y += size.second + 10f
+                pass.bindIndexBuffer(indexBuffer, SDLGPUIndexElementSize.UINT16)
+                for (batch in batches) {
+                    drawBatch(pass, batch)
                 }
 
-                pass.end()
-                pass.close()
+                if (screenshotNextFrame) {
+                    pass.end()
+                    pass.close()
+                    device.waitForIdle()
+                    val pixels = target.download(vw.toInt(), vh.toInt())
+                    if (pixels != null) {
+                        saveBmp(pixels, vw.toInt(), vh.toInt(), "ttf_gpu_screenshot.bmp")
+                        println("screenshot saved: ttf_gpu_screenshot.bmp")
+                    } else {
+                        println("screenshot failed: ${SDL.error()}")
+                    }
+                    screenshotNextFrame = false
+                } else {
+                    pass.end()
+                    pass.close()
+                }
             }
             cmd.end()
         }
@@ -370,32 +408,53 @@ class GpuTextDemo(
     }
 
     /**
-     * Uploads one text's draw sequences into the shared buffers and draws
-     * them, offset/rotated/scaled around the top-left (px, py).
+     * Collects one text's draw sequences into a [DrawBatch]: transforms the
+     * vertices (rotate/scale around the bounding box center, pixel -> NDC)
+     * and produces the interleaved vertex data and UINT16 indices.
      */
-    private fun drawText(
-        pass: SDLGPURenderPass,
-        vw: Float,
-        vh: Float,
+    private fun collectText(
         text: SDLTTFText,
         px: Float,
         py: Float,
         angle: Double,
         scale: Float,
-    ) {
-        val sequences = text.getGPUDrawData() ?: return
+        color: SDLColor,
+        vw: Float,
+        vh: Float,
+    ): DrawBatch? {
+        val sequences = text.getGPUDrawData() ?: return null
         val rad = angle * kotlin.math.PI / 180.0
         val cos = kotlin.math.cos(rad).toFloat()
         val sin = kotlin.math.sin(rad).toFloat()
-        // TTF GPU vertices are pixels with the origin at the text's bottom-left
-        // and positive Y upwards; (px, py) is the top-left screen position
-        // (py grows downwards), so screenY = py + textHeight - y.
-        val textHeight = text.size?.y?.toFloat() ?: 0f
+
+        // TTF GPU vertices are pixels; their origin is above the text's
+        // ascender, so the usable extent is the vertex bounding box itself
+        // (text.size does not match the vertex range). (px, py) is the
+        // top-left screen position (py grows downwards). Rotation happens
+        // around the bounding box center so the text stays in view.
+        var minX = Float.MAX_VALUE
+        var minY = Float.MAX_VALUE
+        var maxX = -Float.MAX_VALUE
+        var maxY = -Float.MAX_VALUE
+        for (sequence in sequences) {
+            val positions = sequence.positions
+            for (i in 0 until positions.size / 2) {
+                val x = positions[i * 2]
+                val y = positions[i * 2 + 1]
+                if (x < minX) minX = x
+                if (x > maxX) maxX = x
+                if (y < minY) minY = y
+                if (y > maxY) maxY = y
+            }
+        }
+        if (minX == Float.MAX_VALUE) return null
+        val centerX = (minX + maxX) / 2f
+        val centerY = (minY + maxY) / 2f
+
         val interleaved = FloatArray(MAX_VERTICES * 4)
         val indices = IntArray(MAX_INDICES)
         var vertexCount = 0
         var indexCount = 0
-
         val draws = ArrayList<SequenceDraw>()
         var firstIndex = 0
         for (sequence in sequences) {
@@ -408,17 +467,24 @@ class GpuTextDemo(
             for (i in 0 until numVertices) {
                 val x = positions[i * 2]
                 val y = positions[i * 2 + 1]
-                // rotate + scale around the text origin
-                val rx = (x * cos - y * sin) * scale
-                val ry = (x * sin + y * cos) * scale
-                // pixel -> NDC (SDL_GPU NDC: +1 at the top of the viewport;
-                // screen y grows downwards, TTF y grows upwards)
-                val out = vertexCount * 4
-                val screenY = py + textHeight - ry
-                interleaved[out] = (px + rx) / vw * 2f - 1f
+                // translate to center, rotate + scale, translate back
+                val lx = x - centerX
+                val ly = y - centerY
+                val rx = (lx * cos - ly * sin) * scale + centerX
+                val ry = (lx * sin + ly * cos) * scale + centerY
+                // pixel -> NDC: the text's top-left corner (rx=minX,
+                // ry=maxY) maps to (px, py); SDL_GPU NDC has +Y at the top.
+                val out = vertexCount * 8
+                val screenX = px + (rx - minX)
+                val screenY = py + (maxY - ry)
+                interleaved[out] = screenX / vw * 2f - 1f
                 interleaved[out + 1] = 1f - screenY / vh * 2f
                 interleaved[out + 2] = uvs[i * 2]
                 interleaved[out + 3] = uvs[i * 2 + 1]
+                interleaved[out + 4] = color.r / 255f
+                interleaved[out + 5] = color.g / 255f
+                interleaved[out + 6] = color.b / 255f
+                interleaved[out + 7] = 1f
                 vertexCount++
             }
             for (i in sequence.indices.indices) {
@@ -428,25 +494,66 @@ class GpuTextDemo(
             draws.add(SequenceDraw(sequence.atlasTexture, sequence.imageType, firstIndex, sequence.indices.size))
             firstIndex += sequence.indices.size
         }
-        if (vertexCount == 0) return
+        if (vertexCount == 0) return null
 
-        vertexBuffer.setData(interleaved.toByteArray(0, vertexCount * VERTEX_STRIDE))
+        val vertexData = interleaved.toByteArray(0, vertexCount * VERTEX_STRIDE)
         val indexBytes = ByteArray(indexCount * 2)
         for (i in 0 until indexCount) {
             val v = indices[i]
             indexBytes[i * 2] = (v and 0xFF).toByte()
             indexBytes[i * 2 + 1] = ((v ushr 8) and 0xFF).toByte()
         }
-        indexBuffer.setData(indexBytes)
+        return DrawBatch(vertexData, indexBytes, draws)
+    }
 
-        pass.bindVertexBuffers(vertexBuffer to 0)
-        pass.bindIndexBuffer(indexBuffer, SDLGPUIndexElementSize.UINT16)
+    /** Collects a texture-backed surface quad. */
+    private fun collectQuad(
+        texture: SDLGPUTexture,
+        px: Float,
+        py: Float,
+        width: Float,
+        height: Float,
+        vw: Float,
+        vh: Float,
+    ): DrawBatch {
+        val x0 = px / vw * 2f - 1f
+        val y0 = 1f - py / vh * 2f
+        val x1 = (px + width) / vw * 2f - 1f
+        val y1 = 1f - (py + height) / vh * 2f
+        val quad = floatArrayOf(
+            x0, y0, 0f, 0f, 1f, 1f, 1f, 1f,
+            x1, y0, 1f, 0f, 1f, 1f, 1f, 1f,
+            x0, y1, 0f, 1f, 1f, 1f, 1f, 1f,
+            x0, y1, 0f, 1f, 1f, 1f, 1f, 1f,
+            x1, y0, 1f, 0f, 1f, 1f, 1f, 1f,
+            x1, y1, 1f, 1f, 1f, 1f, 1f, 1f,
+        )
+        return DrawBatch(
+            vertexData = quad.toByteArray(0, quad.size * 4),
+            indexData = ByteArray(0),
+            draws = listOf(QuadDraw(texture)),
+        )
+    }
 
+    /** Draws a collected batch; vertex/index offsets are bytes into the shared buffers. */
+    private fun drawBatch(pass: SDLGPURenderPass, batch: DrawBatch) {
+        if (batch.draws.isEmpty()) return
+        pass.bindVertexBuffers(vertexBuffer to batch.vertexByteOffset)
+        if (batch.draws[0] is QuadDraw) {
+            val quad = batch.draws[0] as QuadDraw
+            pass.bindGraphicsPipeline(textPipeline)
+            pass.bindGraphicsTextureSamplers(0, quad.texture to sampler)
+            pass.drawPrimitives(vertexCount = 6)
+            return
+        }
+
+        val indexStart = batch.indexByteOffset / 2
         var atlas: SDLGPUTexture? = null
         var lastImageType = -1
-        for (draw in draws) {
-            val atlasTexture = draw.atlasTexture ?: continue
-            val imageType = draw.imageType
+        for (draw in batch.draws) {
+            val seq = draw as SequenceDraw
+            val atlasTexture = seq.atlasTexture ?: continue
+            val imageType = seq.imageType
             if (atlas != atlasTexture || imageType != lastImageType) {
                 atlas = atlasTexture
                 lastImageType = imageType
@@ -458,41 +565,10 @@ class GpuTextDemo(
                 pass.bindGraphicsTextureSamplers(0, atlas to sampler)
             }
             pass.drawIndexedPrimitives(
-                indexCount = draw.indexCount,
-                firstIndex = draw.firstIndex,
+                indexCount = seq.indexCount,
+                firstIndex = indexStart + seq.firstIndex,
             )
         }
-    }
-
-    /** Draws a texture-backed surface as a full quad at screen position (px, py). */
-    private fun drawSurfaceQuad(
-        pass: SDLGPURenderPass,
-        vw: Float,
-        vh: Float,
-        texture: SDLGPUTexture,
-        px: Float,
-        py: Float,
-        width: Float,
-        height: Float,
-    ) {
-        val x0 = px / vw * 2f - 1f
-        val y0 = 1f - py / vh * 2f
-        val x1 = (px + width) / vw * 2f - 1f
-        val y1 = 1f - (py + height) / vh * 2f
-        val quad = floatArrayOf(
-            // position (x, y)   uv (u, v)
-            x0, y0, 0f, 0f,
-            x1, y0, 1f, 0f,
-            x0, y1, 0f, 1f,
-            x0, y1, 0f, 1f,
-            x1, y0, 1f, 0f,
-            x1, y1, 1f, 1f,
-        )
-        vertexBuffer.setData(quad.toByteArray(0, quad.size * 4))
-        pass.bindGraphicsPipeline(textPipeline)
-        pass.bindGraphicsTextureSamplers(0, texture to sampler)
-        pass.bindVertexBuffers(vertexBuffer to 0)
-        pass.drawPrimitives(vertexCount = 6)
     }
 
     fun close() {
@@ -513,12 +589,61 @@ class GpuTextDemo(
         textPipeline.close()
     }
 
+    /** A collected batch of vertices/indices ready to upload and draw. */
+    private class DrawBatch(
+        val vertexData: ByteArray,
+        val indexData: ByteArray,
+        val draws: List<Any>,
+    ) {
+        var vertexByteOffset: Int = 0
+        var indexByteOffset: Int = 0
+    }
+
     private class SequenceDraw(
         val atlasTexture: SDLGPUTexture?,
         val imageType: Int,
         val firstIndex: Int,
         val indexCount: Int,
     )
+
+    private class QuadDraw(val texture: SDLGPUTexture)
+
+    private fun saveBmp(rgba: ByteArray, w: Int, h: Int, path: String) {
+        val rowSize = (w * 3 + 3) / 4 * 4
+        val size = 54 + rowSize * h
+        val bytes = ByteArray(size)
+        bytes[0] = 'B'.code.toByte()
+        bytes[1] = 'M'.code.toByte()
+        writeIntLe(bytes, 2, size)
+        writeIntLe(bytes, 10, 54)
+        writeIntLe(bytes, 14, 40)
+        writeIntLe(bytes, 18, w)
+        writeIntLe(bytes, 22, h)
+        bytes[26] = 1
+        bytes[28] = 24
+        writeIntLe(bytes, 34, rowSize * h)
+        for (y in 0 until h) {
+            val srcRow = y * w * 4
+            val dstRow = (h - 1 - y) * rowSize
+            for (x in 0 until w) {
+                val si = srcRow + x * 4
+                val di = 54 + dstRow + x * 3
+                bytes[di] = rgba[si + 2]
+                bytes[di + 1] = rgba[si + 1]
+                bytes[di + 2] = rgba[si]
+            }
+        }
+        val io = SDLIO.openFile(path, "wb") ?: return
+        io.write(bytes)
+        io.close()
+    }
+
+    private fun writeIntLe(bytes: ByteArray, offset: Int, value: Int) {
+        bytes[offset] = (value and 0xFF).toByte()
+        bytes[offset + 1] = ((value ushr 8) and 0xFF).toByte()
+        bytes[offset + 2] = ((value ushr 16) and 0xFF).toByte()
+        bytes[offset + 3] = ((value ushr 24) and 0xFF).toByte()
+    }
 }
 
 private fun FloatArray.toByteArray(offset: Int, length: Int): ByteArray {

@@ -46,3 +46,6 @@ bin/
 .DS_Store
 ### Local configuration ###
 local.properties
+
+### JVM crash logs ###
+hs_err_pid*.log

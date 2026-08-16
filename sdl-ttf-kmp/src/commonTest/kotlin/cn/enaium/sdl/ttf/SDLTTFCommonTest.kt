@@ -57,6 +57,12 @@ class SDLTTFCommonTest {
         assertTrue(font.ascent > 0, "ascent: ${font.ascent}")
         assertNotNull(font.familyName, "familyName (font: $fontPath)")
         val helloSize = font.getStringSize("Hello")
+        if (helloSize == null) {
+            // Diagnostics for the Windows runner (see the test reports).
+            println("DIAG: getStringSize failed: ${SDLTTF.error()}")
+            println("DIAG: glyphMetrics('H') = ${font.getGlyphMetrics('H'.code)} err=${SDLTTF.error()}")
+            println("DIAG: renderTextBlended = ${SDLTTF.renderTextBlended(font, "H", SDLColor(255, 255, 255)) != null} err=${SDLTTF.error()}")
+        }
         assertTrue(
             helloSize?.x ?: 0 > 0,
             "getStringSize(\"Hello\") failed: ${SDLTTF.error()} (font: $fontPath)",

@@ -279,8 +279,10 @@ static bool SDLCALL ttf_jni_fontbuf_close(void *userdata) {
 // copy); every retry succeeds. Perform one throwaway measurement so the
 // first user-visible call always works.
 static void ttf_jni_warmup_font(TTF_Font *font) {
+    // A representative multi-character string with kerning, so the warm-up
+    // exercises the same shaping path as typical user calls.
     int w = 0, h = 0;
-    TTF_GetStringSize(font, " ", 1, &w, &h);
+    TTF_GetStringSize(font, "Hello, world!", 13, &w, &h);
     SDL_ClearError();
 }
 

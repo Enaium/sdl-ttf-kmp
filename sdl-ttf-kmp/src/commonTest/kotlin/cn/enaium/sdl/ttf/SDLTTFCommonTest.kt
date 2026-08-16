@@ -23,6 +23,7 @@
 package cn.enaium.sdl.ttf
 
 import cn.enaium.sdl.SDLColor
+import cn.enaium.sdl.ttf.SDLTTFHinting
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -62,8 +63,18 @@ class SDLTTFCommonTest {
             // Diagnostics for the Windows runner (see the test reports).
             println("DIAG: getStringSize failed: ${SDLTTF.error()}")
             println("DIAG: glyphMetrics('H') = ${font.getGlyphMetrics('H'.code)} err=${SDLTTF.error()}")
+            font.hinting = SDLTTFHinting.NONE
+            println("DIAG: hinting=NONE getStringSize = ${font.getStringSize("H")} err=${SDLTTF.error()}")
+            font.hinting = SDLTTFHinting.NORMAL
+            println("DIAG: size=${font.size} family=${font.familyName} style=${font.style} kerning=${font.kerning}")
+            println("DIAG: wrapped = ${font.getStringSizeWrapped("H", 100)} err=${SDLTTF.error()}")
+            println("DIAG: measure = ${font.measureString("H", 100)} err=${SDLTTF.error()}")
+            val glyphSurf = SDLTTF.renderGlyphBlended(font, 'H'.code, SDLColor(255, 255, 255))
+            println("DIAG: renderGlyphBlended(H) = ${glyphSurf != null} err=${SDLTTF.error()}")
+            glyphSurf?.close()
             val blended = SDLTTF.renderTextBlended(font, "H", SDLColor(255, 255, 255))
-            println("DIAG: renderTextBlended = ${blended != null} err=${SDLTTF.error()}")
+            println("DIAG: renderTextBlended(H) = ${blended != null} err=${SDLTTF.error()}")
+            blended?.close()
         }
         assertTrue(
             helloSize?.x ?: 0 > 0,

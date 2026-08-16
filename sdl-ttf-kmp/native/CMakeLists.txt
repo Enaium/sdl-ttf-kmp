@@ -57,6 +57,19 @@ set(SDLTTF_VENDORED ON CACHE BOOL "" FORCE)
 set(SDLTTF_INSTALL OFF CACHE BOOL "" FORCE)
 set(SDLTTF_SAMPLES OFF CACHE BOOL "" FORCE)
 
+# SDL3's SDL_opengl.h is empty on iOS/tvOS (no OpenGL there), so SDL_ttf's GL
+# text engine (SDL_gl_textengine.c) has no GL types to compile against on
+# those platforms. CMake cannot drop a source from a target defined by
+# another project, and per-source options set from outside that project are
+# ignored, so a CMAKE_PROJECT_INCLUDE file is injected at SDL_ttf's project()
+# call to compile the file with a forced include of a stub header that
+# provides exactly the declarations it uses. The engine is dead code on
+# iOS/tvOS (nothing creates it).
+if(CMAKE_SYSTEM_NAME STREQUAL "iOS" OR CMAKE_SYSTEM_NAME STREQUAL "tvOS")
+    set(SDL_TTF_KMP_STUB_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+    set(CMAKE_PROJECT_INCLUDE "${CMAKE_CURRENT_SOURCE_DIR}/ttf_project_include.cmake")
+endif()
+
 add_subdirectory(${SDLTTF_SOURCE_DIR} SDL_ttf)
 
 # Copy the merged archive (SDL_ttf + freetype + harfbuzz + plutosvg objects)

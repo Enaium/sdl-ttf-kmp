@@ -22,6 +22,7 @@
 
 package cn.enaium.sdl.ttf
 
+import cn.enaium.sdl.SDLColor
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull

@@ -61,7 +61,8 @@ class SDLTTFCommonTest {
             // Diagnostics for the Windows runner (see the test reports).
             println("DIAG: getStringSize failed: ${SDLTTF.error()}")
             println("DIAG: glyphMetrics('H') = ${font.getGlyphMetrics('H'.code)} err=${SDLTTF.error()}")
-            println("DIAG: renderTextBlended = ${SDLTTF.renderTextBlended(font, "H", SDLColor(255, 255, 255)) != null} err=${SDLTTF.error()}")
+            val blended = SDLTTF.renderTextBlended(font, "H", SDLColor(255, 255, 255))
+            println("DIAG: renderTextBlended = ${blended != null} err=${SDLTTF.error()}")
         }
         assertTrue(
             helloSize?.x ?: 0 > 0,

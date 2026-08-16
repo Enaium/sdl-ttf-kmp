@@ -214,13 +214,13 @@ internal class JvmSDLTTFFont internal constructor(ptr: Long) : SDLTTFFont {
         Jni.getGlyphKerning(check(), previousCh, ch)?.first()
 
     override fun getStringSize(text: String): SDLPoint? =
-        Jni.getStringSize(check(), text, 0)?.let { SDLPoint(it[0], it[1]) }
+        Jni.getStringSize(check(), text)?.let { SDLPoint(it[0], it[1]) }
 
     override fun getStringSizeWrapped(text: String, wrapWidth: Int): SDLPoint? =
-        Jni.getStringSizeWrapped(check(), text, 0, wrapWidth)?.let { SDLPoint(it[0], it[1]) }
+        Jni.getStringSizeWrapped(check(), text, wrapWidth)?.let { SDLPoint(it[0], it[1]) }
 
     override fun measureString(text: String, maxWidth: Int): SDLTTFMeasure? =
-        Jni.measureString(check(), text, 0, maxWidth)?.let { SDLTTFMeasure(it[0], it[1]) }
+        Jni.measureString(check(), text, maxWidth)?.let { SDLTTFMeasure(it[0], it[1]) }
 
     override fun addFallbackFont(fallback: SDLTTFFont): Boolean {
         val fallbackPtr = (fallback as? JvmSDLTTFFont)?.check()
@@ -327,11 +327,11 @@ internal class JvmSDLTTFText internal constructor(
         return Jni.drawSurfaceText(check(), x, y, surface.ptr)
     }
 
-    override fun setText(text: String): Boolean = Jni.setTextString(check(), text, 0)
+    override fun setText(text: String): Boolean = Jni.setTextString(check(), text)
 
-    override fun append(text: String): Boolean = Jni.appendTextString(check(), text, 0)
+    override fun append(text: String): Boolean = Jni.appendTextString(check(), text)
 
-    override fun insert(offset: Int, text: String): Boolean = Jni.insertTextString(check(), offset, text, 0)
+    override fun insert(offset: Int, text: String): Boolean = Jni.insertTextString(check(), offset, text)
 
     override fun delete(offset: Int, length: Int): Boolean = Jni.deleteTextString(check(), offset, length)
 
@@ -425,7 +425,7 @@ actual object SDLTTF {
     actual fun createText(engine: SDLTTFTextEngine?, font: SDLTTFFont?, text: String): SDLTTFText {
         val enginePtr = (engine as? JvmSDLTTFTextEngine)?.engine ?: 0L
         val fontPtr = (font as? JvmSDLTTFFont)?.font ?: 0L
-        val t = Jni.createText(enginePtr, fontPtr, text, 0)
+        val t = Jni.createText(enginePtr, fontPtr, text)
         check(t != 0L) { "TTF_CreateText failed: ${SDLTTF.error()}" }
         return JvmSDLTTFText(t, engine as? JvmSDLTTFTextEngine, font as? JvmSDLTTFFont)
     }
@@ -436,9 +436,9 @@ actual object SDLTTF {
         val f = (font as? JvmSDLTTFFont)?.check()
             ?: throw IllegalArgumentException("font is not a JVM SDL_ttf font")
         val ptr = if (wrapWidth > 0) {
-            Jni.renderTextSolidWrapped(f, text, 0, fg.r, fg.g, fg.b, fg.a, wrapWidth)
+            Jni.renderTextSolidWrapped(f, text, fg.r, fg.g, fg.b, fg.a, wrapWidth)
         } else {
-            Jni.renderTextSolid(f, text, 0, fg.r, fg.g, fg.b, fg.a)
+            Jni.renderTextSolid(f, text, fg.r, fg.g, fg.b, fg.a)
         }
         return surfaceOf(ptr)
     }
@@ -447,9 +447,9 @@ actual object SDLTTF {
         val f = (font as? JvmSDLTTFFont)?.check()
             ?: throw IllegalArgumentException("font is not a JVM SDL_ttf font")
         val ptr = if (wrapWidth > 0) {
-            Jni.renderTextShadedWrapped(f, text, 0, fg.r, fg.g, fg.b, fg.a, bg.r, bg.g, bg.b, bg.a, wrapWidth)
+            Jni.renderTextShadedWrapped(f, text, fg.r, fg.g, fg.b, fg.a, bg.r, bg.g, bg.b, bg.a, wrapWidth)
         } else {
-            Jni.renderTextShaded(f, text, 0, fg.r, fg.g, fg.b, fg.a, bg.r, bg.g, bg.b, bg.a)
+            Jni.renderTextShaded(f, text, fg.r, fg.g, fg.b, fg.a, bg.r, bg.g, bg.b, bg.a)
         }
         return surfaceOf(ptr)
     }
@@ -458,9 +458,9 @@ actual object SDLTTF {
         val f = (font as? JvmSDLTTFFont)?.check()
             ?: throw IllegalArgumentException("font is not a JVM SDL_ttf font")
         val ptr = if (wrapWidth > 0) {
-            Jni.renderTextBlendedWrapped(f, text, 0, fg.r, fg.g, fg.b, fg.a, wrapWidth)
+            Jni.renderTextBlendedWrapped(f, text, fg.r, fg.g, fg.b, fg.a, wrapWidth)
         } else {
-            Jni.renderTextBlended(f, text, 0, fg.r, fg.g, fg.b, fg.a)
+            Jni.renderTextBlended(f, text, fg.r, fg.g, fg.b, fg.a)
         }
         return surfaceOf(ptr)
     }
@@ -469,9 +469,9 @@ actual object SDLTTF {
         val f = (font as? JvmSDLTTFFont)?.check()
             ?: throw IllegalArgumentException("font is not a JVM SDL_ttf font")
         val ptr = if (wrapWidth > 0) {
-            Jni.renderTextLCDWrapped(f, text, 0, fg.r, fg.g, fg.b, fg.a, bg.r, bg.g, bg.b, bg.a, wrapWidth)
+            Jni.renderTextLCDWrapped(f, text, fg.r, fg.g, fg.b, fg.a, bg.r, bg.g, bg.b, bg.a, wrapWidth)
         } else {
-            Jni.renderTextLCD(f, text, 0, fg.r, fg.g, fg.b, fg.a, bg.r, bg.g, bg.b, bg.a)
+            Jni.renderTextLCD(f, text, fg.r, fg.g, fg.b, fg.a, bg.r, bg.g, bg.b, bg.a)
         }
         return surfaceOf(ptr)
     }

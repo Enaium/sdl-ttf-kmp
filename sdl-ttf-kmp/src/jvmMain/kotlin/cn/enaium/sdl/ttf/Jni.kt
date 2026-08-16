@@ -107,22 +107,22 @@ internal object Jni {
     external fun fontHasGlyph(font: Long, ch: Int): Boolean
     external fun getGlyphMetrics(font: Long, ch: Int): IntArray?
     external fun getGlyphKerning(font: Long, previousCh: Int, ch: Int): IntArray?
-    external fun getStringSize(font: Long, text: String, length: Int): IntArray?
-    external fun getStringSizeWrapped(font: Long, text: String, length: Int, wrapWidth: Int): IntArray?
-    external fun measureString(font: Long, text: String, length: Int, maxWidth: Int): IntArray?
+    external fun getStringSize(font: Long, text: String): IntArray?
+    external fun getStringSizeWrapped(font: Long, text: String, wrapWidth: Int): IntArray?
+    external fun measureString(font: Long, text: String, maxWidth: Int): IntArray?
 
     // =========================================================================
     // Rendering to surfaces
     // =========================================================================
 
-    external fun renderTextSolid(font: Long, text: String, length: Int, r: Int, g: Int, b: Int, a: Int): Long
-    external fun renderTextSolidWrapped(font: Long, text: String, length: Int, r: Int, g: Int, b: Int, a: Int, wrapWidth: Int): Long
-    external fun renderTextShaded(font: Long, text: String, length: Int, r: Int, g: Int, b: Int, a: Int, br: Int, bg: Int, bb: Int, ba: Int): Long
-    external fun renderTextShadedWrapped(font: Long, text: String, length: Int, r: Int, g: Int, b: Int, a: Int, br: Int, bg: Int, bb: Int, ba: Int, wrapWidth: Int): Long
-    external fun renderTextBlended(font: Long, text: String, length: Int, r: Int, g: Int, b: Int, a: Int): Long
-    external fun renderTextBlendedWrapped(font: Long, text: String, length: Int, r: Int, g: Int, b: Int, a: Int, wrapWidth: Int): Long
-    external fun renderTextLCD(font: Long, text: String, length: Int, r: Int, g: Int, b: Int, a: Int, br: Int, bg: Int, bb: Int, ba: Int): Long
-    external fun renderTextLCDWrapped(font: Long, text: String, length: Int, r: Int, g: Int, b: Int, a: Int, br: Int, bg: Int, bb: Int, ba: Int, wrapWidth: Int): Long
+    external fun renderTextSolid(font: Long, text: String, r: Int, g: Int, b: Int, a: Int): Long
+    external fun renderTextSolidWrapped(font: Long, text: String, r: Int, g: Int, b: Int, a: Int, wrapWidth: Int): Long
+    external fun renderTextShaded(font: Long, text: String, r: Int, g: Int, b: Int, a: Int, br: Int, bg: Int, bb: Int, ba: Int): Long
+    external fun renderTextShadedWrapped(font: Long, text: String, r: Int, g: Int, b: Int, a: Int, br: Int, bg: Int, bb: Int, ba: Int, wrapWidth: Int): Long
+    external fun renderTextBlended(font: Long, text: String, r: Int, g: Int, b: Int, a: Int): Long
+    external fun renderTextBlendedWrapped(font: Long, text: String, r: Int, g: Int, b: Int, a: Int, wrapWidth: Int): Long
+    external fun renderTextLCD(font: Long, text: String, r: Int, g: Int, b: Int, a: Int, br: Int, bg: Int, bb: Int, ba: Int): Long
+    external fun renderTextLCDWrapped(font: Long, text: String, r: Int, g: Int, b: Int, a: Int, br: Int, bg: Int, bb: Int, ba: Int, wrapWidth: Int): Long
     external fun renderGlyphSolid(font: Long, ch: Int, r: Int, g: Int, b: Int, a: Int): Long
     external fun renderGlyphShaded(font: Long, ch: Int, r: Int, g: Int, b: Int, a: Int, br: Int, bg: Int, bb: Int, ba: Int): Long
     external fun renderGlyphBlended(font: Long, ch: Int, r: Int, g: Int, b: Int, a: Int): Long
@@ -163,7 +163,7 @@ internal object Jni {
     // Text objects
     // =========================================================================
 
-    external fun createText(engine: Long, font: Long, text: String, length: Int): Long
+    external fun createText(engine: Long, font: Long, text: String): Long
     external fun destroyText(text: Long)
     external fun setTextEngine(text: Long, engine: Long): Boolean
     external fun setTextFont(text: Long, font: Long): Boolean
@@ -177,9 +177,9 @@ internal object Jni {
     external fun getTextWrapWidth(text: Long): Int
     external fun setTextWrapWhitespaceVisible(text: Long, visible: Boolean): Boolean
     external fun textWrapWhitespaceVisible(text: Long): Boolean
-    external fun setTextString(text: Long, string: String, length: Int): Boolean
-    external fun appendTextString(text: Long, string: String, length: Int): Boolean
-    external fun insertTextString(text: Long, offset: Int, string: String, length: Int): Boolean
+    external fun setTextString(text: Long, string: String): Boolean
+    external fun appendTextString(text: Long, string: String): Boolean
+    external fun insertTextString(text: Long, offset: Int, string: String): Boolean
     external fun deleteTextString(text: Long, offset: Int, length: Int): Boolean
     external fun getTextString(text: Long): String?
     external fun getTextNumLines(text: Long): Int

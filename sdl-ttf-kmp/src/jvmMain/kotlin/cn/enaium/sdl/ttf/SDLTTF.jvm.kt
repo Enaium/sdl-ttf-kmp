@@ -29,6 +29,7 @@ import cn.enaium.sdl.SDLPoint
 import cn.enaium.sdl.SDLRect
 import cn.enaium.sdl.SDLRenderer
 import cn.enaium.sdl.SDLScaleMode
+import cn.enaium.sdl.SDLGPUTexture
 import cn.enaium.sdl.SDLSurface
 
 /**
@@ -124,6 +125,30 @@ internal class JvmTTFSurface internal constructor(
 
 internal actual fun Long.toSDLSurface(owned: Boolean): SDLSurface? =
     if (this == 0L) null else JvmTTFSurface(this, owned = owned)
+
+/**
+ * An [SDLGPUTexture] wrapping the texture atlas of a GPU text engine. The
+ * atlas is owned and updated by the engine; upload/download are therefore
+ * unsupported and [close] never destroys it.
+ */
+internal class JvmSDLGPUTexture internal constructor(
+    ptr: Long,
+    private val owned: Boolean,
+) : SDLGPUTexture {
+
+    internal var texture: Long = ptr
+
+    override val ptr: Long get() = texture
+
+    override fun upload(data: ByteArray, bytesPerRow: Int, x: Int, y: Int, width: Int, height: Int): Boolean =
+        false
+
+    override fun download(width: Int, height: Int): ByteArray? = null
+
+    override fun close() {
+        texture = 0L
+    }
+}
 
 internal class JvmSDLTTFFont internal constructor(ptr: Long) : SDLTTFFont {
 
@@ -248,7 +273,7 @@ internal class JvmSDLTTFFont internal constructor(ptr: Long) : SDLTTFFont {
 
 internal class JvmSDLTTFTextEngine internal constructor(
     ptr: Long,
-    private val rendererEngine: Boolean,
+    private val kind: Int,
 ) : SDLTTFTextEngine {
 
     internal var engine: Long = ptr
@@ -262,12 +287,18 @@ internal class JvmSDLTTFTextEngine internal constructor(
         val e = engine
         if (e == 0L) return
         engine = 0L
-        if (rendererEngine) {
-            Jni.destroyRendererTextEngine(e)
-        } else {
-            Jni.destroySurfaceTextEngine(e)
+        when (kind) {
+            SDLTTFTextEngineKind.RENDERER -> Jni.destroyRendererTextEngine(e)
+            SDLTTFTextEngineKind.SURFACE -> Jni.destroySurfaceTextEngine(e)
+            else -> Jni.destroyGPUTextEngine(e)
         }
     }
+}
+
+internal object SDLTTFTextEngineKind {
+    const val RENDERER = 0
+    const val SURFACE = 1
+    const val GPU = 2
 }
 
 internal class JvmSDLTTFText internal constructor(
@@ -344,6 +375,32 @@ internal class JvmSDLTTFText internal constructor(
     override fun subStringForPoint(x: Int, y: Int): SDLTTFSubString? =
         Jni.getTextSubStringForPoint(check(), x, y)?.let { it.toSubString() }
 
+    override fun getGPUDrawData(): List<SDLTTFGPUAtlasDrawSequence>? {
+        val data = Jni.gpuDrawData(check()) ?: return null
+        val meta = data[0] as LongArray
+        val positions = data[1] as FloatArray
+        val uvs = data[2] as FloatArray
+        val indices = data[3] as IntArray
+        val count = meta.size / 6
+        return List(count) { i ->
+            val base = i * 6
+            val atlasPtr = meta[base]
+            val imageType = meta[base + 1].toInt()
+            val numVertices = meta[base + 2].toInt()
+            val numIndices = meta[base + 3].toInt()
+            val vertexStart = meta[base + 4].toInt()
+            val indexStart = meta[base + 5].toInt()
+            SDLTTFGPUAtlasDrawSequence(
+                atlasTexture = if (atlasPtr != 0L) JvmSDLGPUTexture(atlasPtr, owned = false) else null,
+                atlasTexturePtr = atlasPtr,
+                imageType = imageType,
+                positions = positions.copyOfRange(vertexStart * 2, (vertexStart + numVertices) * 2),
+                uvs = uvs.copyOfRange(vertexStart * 2, (vertexStart + numVertices) * 2),
+                indices = indices.copyOfRange(indexStart, indexStart + numIndices),
+            )
+        }
+    }
+
     override fun close() {
         val t = textPtr
         if (t == 0L) return
@@ -413,13 +470,20 @@ actual object SDLTTF {
         if (renderer.ptr == 0L) throw IllegalStateException("SDL renderer is closed")
         val engine = Jni.createRendererTextEngine(renderer.ptr)
         check(engine != 0L) { "TTF_CreateRendererTextEngine failed: ${SDLTTF.error()}" }
-        return JvmSDLTTFTextEngine(engine, rendererEngine = true)
+        return JvmSDLTTFTextEngine(engine, SDLTTFTextEngineKind.RENDERER)
     }
 
     actual fun createSurfaceTextEngine(): SDLTTFTextEngine {
         val engine = Jni.createSurfaceTextEngine()
         check(engine != 0L) { "TTF_CreateSurfaceTextEngine failed: ${SDLTTF.error()}" }
-        return JvmSDLTTFTextEngine(engine, rendererEngine = false)
+        return JvmSDLTTFTextEngine(engine, SDLTTFTextEngineKind.SURFACE)
+    }
+
+    actual fun createGPUTextEngine(device: cn.enaium.sdl.SDLGPUDevice): SDLTTFTextEngine {
+        if (device.ptr == 0L) throw IllegalStateException("SDL GPU device is closed")
+        val engine = Jni.createGPUTextEngine(device.ptr)
+        check(engine != 0L) { "TTF_CreateGPUTextEngine failed: ${SDLTTF.error()}" }
+        return JvmSDLTTFTextEngine(engine, SDLTTFTextEngineKind.GPU)
     }
 
     actual fun createText(engine: SDLTTFTextEngine?, font: SDLTTFFont?, text: String): SDLTTFText {

@@ -28,6 +28,7 @@ rootProject.name = "sdl-ttf-kmp"
 include(":sdl-ttf-kmp")
 
 include(":examples:ttf_renderer")
+include(":examples:ttf_gpu")
 
 // Per-OS/arch JNI artifacts that bundle the prebuilt libsdl_ttf_jni shared
 // library as a classpath resource. The TTF JNI library references the SDL3

@@ -156,8 +156,10 @@ internal object Jni {
 
     external fun createRendererTextEngine(renderer: Long): Long
     external fun createSurfaceTextEngine(): Long
+    external fun createGPUTextEngine(device: Long): Long
     external fun destroyRendererTextEngine(engine: Long)
     external fun destroySurfaceTextEngine(engine: Long)
+    external fun destroyGPUTextEngine(engine: Long)
 
     // =========================================================================
     // Text objects
@@ -187,6 +189,7 @@ internal object Jni {
     external fun drawRendererText(text: Long, x: Float, y: Float): Boolean
     external fun drawSurfaceText(text: Long, x: Int, y: Int, surface: Long): Boolean
     external fun updateText(text: Long): Boolean
+    external fun gpuDrawData(text: Long): Array<Any>?
     external fun getTextSubString(text: Long, offset: Int): IntArray?
     external fun getTextSubStringForLine(text: Long, line: Int): IntArray?
     external fun getTextSubStringForPoint(text: Long, x: Int, y: Int): IntArray?

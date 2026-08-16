@@ -23,6 +23,8 @@
 package cn.enaium.sdl.ttf
 
 import cn.enaium.sdl.SDLColor
+import cn.enaium.sdl.SDLGPUDevice
+import cn.enaium.sdl.SDLGPUTexture
 import cn.enaium.sdl.SDLIOStream
 import cn.enaium.sdl.SDLPoint
 import cn.enaium.sdl.SDLRect
@@ -126,6 +128,25 @@ data class SDLTTFSubString(
     val length: Int,
     val lineIndex: Int,
     val rect: SDLRect,
+)
+
+/**
+ * One draw sequence of a GPU-laid-out [SDLTTFText] (see
+ * [SDLTTFText.getGPUDrawData]).
+ *
+ * [atlasTexture] is the texture atlas holding the glyphs (owned by the text
+ * engine; do not close it), or null for a solid-fill sequence. [positions]
+ * are vertex positions in pixels with positive Y upwards (the SDL_GPU
+ * convention), [uvs] normalized texture coordinates; both are pairs
+ * (x, y). [indices] reference the vertices.
+ */
+data class SDLTTFGPUAtlasDrawSequence(
+    val atlasTexture: SDLGPUTexture?,
+    val atlasTexturePtr: Long,
+    val imageType: Int,
+    val positions: FloatArray,
+    val uvs: FloatArray,
+    val indices: IntArray,
 )
 
 // =========================================================================
@@ -306,6 +327,13 @@ interface SDLTTFText : AutoCloseable {
     /** The substring closest to ([x], [y]) relative to the text, or null. */
     fun subStringForPoint(x: Int, y: Int): SDLTTFSubString?
 
+    /**
+     * The draw sequences of this text for the GPU API (the text must have
+     * been created with a GPU text engine), or null on failure. Vertices use
+     * pixel coordinates with positive Y upwards.
+     */
+    fun getGPUDrawData(): List<SDLTTFGPUAtlasDrawSequence>?
+
     /** Releases the text object. */
     override fun close()
 }
@@ -388,6 +416,13 @@ expect object SDLTTF {
 
     /** Creates a text engine that draws on SDL surfaces, or throws. */
     fun createSurfaceTextEngine(): SDLTTFTextEngine
+
+    /**
+     * Creates a text engine that lays text out for the SDL GPU API (the
+     * draw data is obtained with [SDLTTFText.getGPUDrawData] and rendered
+     * by the application), or throws an exception describing the SDL error.
+     */
+    fun createGPUTextEngine(device: SDLGPUDevice): SDLTTFTextEngine
 
     /**
      * Creates a text object; [engine] and [font] may be null and set later

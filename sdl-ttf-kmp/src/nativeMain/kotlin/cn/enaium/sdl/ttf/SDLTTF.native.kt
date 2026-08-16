@@ -4,12 +4,16 @@ package cn.enaium.sdl.ttf
 
 import cn.enaium.sdl.SDL
 import cn.enaium.sdl.SDLColor
+import cn.enaium.sdl.SDLGPUDevice
+import cn.enaium.sdl.SDLGPUTexture
 import cn.enaium.sdl.SDLIOStream
 import cn.enaium.sdl.SDLPoint
 import cn.enaium.sdl.SDLRect
 import cn.enaium.sdl.SDLRenderer
 import cn.enaium.sdl.SDLSurface
 import cnames.structs.SDL_IOStream
+import cnames.structs.SDL_GPUDevice
+import cnames.structs.SDL_GPUTexture
 import cnames.structs.SDL_Renderer
 import cnames.structs.TTF_Font
 import cnames.structs.TTF_TextEngine
@@ -22,10 +26,12 @@ import sdl_ttf.TTF_ClearFallbackFonts
 import sdl_ttf.TTF_CloseFont
 import sdl_ttf.TTF_CopyFont
 import sdl_ttf.TTF_CreateRendererTextEngine
+import sdl_ttf.TTF_CreateGPUTextEngine
 import sdl_ttf.TTF_CreateSurfaceTextEngine
 import sdl_ttf.TTF_CreateText
 import sdl_ttf.TTF_DeleteTextString
 import sdl_ttf.TTF_DestroyRendererTextEngine
+import sdl_ttf.TTF_DestroyGPUTextEngine
 import sdl_ttf.TTF_DestroySurfaceTextEngine
 import sdl_ttf.TTF_DestroyText
 import sdl_ttf.TTF_DrawRendererText
@@ -33,6 +39,7 @@ import sdl_ttf.TTF_DrawSurfaceText
 import sdl_ttf.TTF_FontHasGlyph
 import sdl_ttf.TTF_FontIsFixedWidth
 import sdl_ttf.TTF_FontIsScalable
+import sdl_ttf.TTF_GPUAtlasDrawSequence
 import sdl_ttf.TTF_GetFontAscent
 import sdl_ttf.TTF_GetFontCharSpacing
 import sdl_ttf.TTF_GetFontDPI
@@ -63,6 +70,7 @@ import sdl_ttf.TTF_GetTextPosition
 import sdl_ttf.TTF_GetTextSize
 import sdl_ttf.TTF_GetTextSubString
 import sdl_ttf.TTF_GetTextSubStringForLine
+import sdl_ttf.TTF_GetGPUTextDrawData
 import sdl_ttf.TTF_GetTextSubStringForPoint
 import sdl_ttf.TTF_GetTextWrapWidth
 import sdl_ttf.TTF_Init
@@ -267,6 +275,29 @@ internal actual fun Long.toSDLSurface(owned: Boolean): SDLSurface? {
     return NativeTTFSurface(this.toCPointer<SDL_Surface>(), owned = owned)
 }
 
+/**
+ * An [SDLGPUTexture] wrapping the texture atlas of a GPU text engine (owned
+ * by the engine; upload/download are unsupported, close never destroys it).
+ */
+internal class NativeSDLGPUTexture internal constructor(
+    ptr: CPointer<SDL_GPUTexture>?,
+    private val owned: Boolean,
+) : SDLGPUTexture {
+
+    internal var texture: CPointer<SDL_GPUTexture>? = ptr
+
+    override val ptr: Long get() = texture?.rawValue?.toLong() ?: 0L
+
+    override fun upload(data: ByteArray, bytesPerRow: Int, x: Int, y: Int, width: Int, height: Int): Boolean =
+        false
+
+    override fun download(width: Int, height: Int): ByteArray? = null
+
+    override fun close() {
+        texture = null
+    }
+}
+
 internal class NativeSDLTTFFont internal constructor(
     ptr: CPointer<TTF_Font>?,
 ) : SDLTTFFont {
@@ -427,7 +458,7 @@ internal class NativeSDLTTFFont internal constructor(
 
 internal class NativeSDLTTFTextEngine internal constructor(
     ptr: CPointer<TTF_TextEngine>?,
-    private val rendererEngine: Boolean,
+    private val kind: Int,
 ) : SDLTTFTextEngine {
 
     internal var engine: CPointer<TTF_TextEngine>? = ptr
@@ -441,12 +472,18 @@ internal class NativeSDLTTFTextEngine internal constructor(
         val e = engine
         if (e == null) return
         engine = null
-        if (rendererEngine) {
-            TTF_DestroyRendererTextEngine(e)
-        } else {
-            TTF_DestroySurfaceTextEngine(e)
+        when (kind) {
+            SDLTTFTextEngineKind.RENDERER -> TTF_DestroyRendererTextEngine(e)
+            SDLTTFTextEngineKind.SURFACE -> TTF_DestroySurfaceTextEngine(e)
+            else -> TTF_DestroyGPUTextEngine(e)
         }
     }
+}
+
+internal object SDLTTFTextEngineKind {
+    const val RENDERER = 0
+    const val SURFACE = 1
+    const val GPU = 2
 }
 
 internal class NativeSDLTTFText internal constructor(
@@ -567,6 +604,38 @@ internal class NativeSDLTTFText internal constructor(
         }
     }
 
+    override fun getGPUDrawData(): List<SDLTTFGPUAtlasDrawSequence>? {
+        val head = TTF_GetGPUTextDrawData(check()) ?: return null
+        val out = mutableListOf<SDLTTFGPUAtlasDrawSequence>()
+        var sequence: CPointer<TTF_GPUAtlasDrawSequence>? = head
+        while (sequence != null) {
+            val pointed = sequence.pointed
+            val numVertices = pointed.num_vertices
+            val positions = FloatArray(numVertices * 2)
+            val uvs = FloatArray(numVertices * 2)
+            for (i in 0 until numVertices) {
+                positions[i * 2] = pointed.xy!![i].x
+                positions[i * 2 + 1] = pointed.xy!![i].y
+                uvs[i * 2] = pointed.uv!![i].x
+                uvs[i * 2 + 1] = pointed.uv!![i].y
+            }
+            val indices = IntArray(pointed.num_indices)
+            for (i in indices.indices) {
+                indices[i] = pointed.indices!![i]
+            }
+            out += SDLTTFGPUAtlasDrawSequence(
+                atlasTexture = if (pointed.atlas_texture != null) NativeSDLGPUTexture(pointed.atlas_texture, owned = false) else null,
+                atlasTexturePtr = pointed.atlas_texture?.rawValue?.toLong() ?: 0L,
+                imageType = pointed.image_type.value.toInt(),
+                positions = positions,
+                uvs = uvs,
+                indices = indices,
+            )
+            sequence = pointed.next
+        }
+        return out
+    }
+
     override fun close() {
         val t = textPtr
         if (t == null) return
@@ -642,13 +711,20 @@ actual object SDLTTF {
         if (renderer.ptr == 0L) throw IllegalStateException("SDL renderer is closed")
         val engine = TTF_CreateRendererTextEngine(renderer.ptr.toCPointer<SDL_Renderer>())
             ?: throw IllegalStateException("TTF_CreateRendererTextEngine failed: ${SDLTTF.error()}")
-        return NativeSDLTTFTextEngine(engine, rendererEngine = true)
+        return NativeSDLTTFTextEngine(engine, SDLTTFTextEngineKind.RENDERER)
     }
 
     actual fun createSurfaceTextEngine(): SDLTTFTextEngine {
         val engine = TTF_CreateSurfaceTextEngine()
             ?: throw IllegalStateException("TTF_CreateSurfaceTextEngine failed: ${SDLTTF.error()}")
-        return NativeSDLTTFTextEngine(engine, rendererEngine = false)
+        return NativeSDLTTFTextEngine(engine, SDLTTFTextEngineKind.SURFACE)
+    }
+
+    actual fun createGPUTextEngine(device: SDLGPUDevice): SDLTTFTextEngine {
+        if (device.ptr == 0L) throw IllegalStateException("SDL GPU device is closed")
+        val engine = TTF_CreateGPUTextEngine(device.ptr.toCPointer<SDL_GPUDevice>())
+            ?: throw IllegalStateException("TTF_CreateGPUTextEngine failed: ${SDLTTF.error()}")
+        return NativeSDLTTFTextEngine(engine, SDLTTFTextEngineKind.GPU)
     }
 
     actual fun createText(engine: SDLTTFTextEngine?, font: SDLTTFFont?, text: String): SDLTTFText {

@@ -109,6 +109,22 @@ static inline jintArray ttf_jni_new_jint_array(JNIEnv *env, const std::vector<ji
     return arr;
 }
 
+static inline jlongArray ttf_jni_new_jlong_array(JNIEnv *env, const std::vector<jlong> &values) {
+    jlongArray arr = env->NewLongArray(static_cast<jsize>(values.size()));
+    if (arr && !values.empty()) {
+        env->SetLongArrayRegion(arr, 0, static_cast<jsize>(values.size()), values.data());
+    }
+    return arr;
+}
+
+static inline jfloatArray ttf_jni_new_jfloat_array(JNIEnv *env, const std::vector<jfloat> &values) {
+    jfloatArray arr = env->NewFloatArray(static_cast<jsize>(values.size()));
+    if (arr && !values.empty()) {
+        env->SetFloatArrayRegion(arr, 0, static_cast<jsize>(values.size()), values.data());
+    }
+    return arr;
+}
+
 static inline jbyteArray ttf_jni_to_bytes(JNIEnv *env, const void *data, jsize len) {
     jbyteArray arr = env->NewByteArray(len);
     if (arr && data && len > 0) {
@@ -778,6 +794,15 @@ TTFJNI_FUNC(jlong) TTFJNI_NAME(createSurfaceTextEngine)(JNIEnv *, jclass) {
     return ttf_jni_ptr(TTF_CreateSurfaceTextEngine());
 }
 
+TTFJNI_FUNC(jlong) TTFJNI_NAME(createGPUTextEngine)(JNIEnv *, jclass, jlong device) {
+    auto *d = reinterpret_cast<SDL_GPUDevice *>(static_cast<intptr_t>(device));
+    return ttf_jni_ptr(TTF_CreateGPUTextEngine(d));
+}
+
+TTFJNI_FUNC(void) TTFJNI_NAME(destroyGPUTextEngine)(JNIEnv *, jclass, jlong engine) {
+    TTF_DestroyGPUTextEngine(ttf_jni_engine(engine));
+}
+
 TTFJNI_FUNC(void) TTFJNI_NAME(destroyRendererTextEngine)(JNIEnv *, jclass, jlong engine) {
     TTF_DestroyRendererTextEngine(ttf_jni_engine(engine));
 }
@@ -789,6 +814,62 @@ TTFJNI_FUNC(void) TTFJNI_NAME(destroySurfaceTextEngine)(JNIEnv *, jclass, jlong 
 // ---------------------------------------------------------------------------
 // Text objects
 // ---------------------------------------------------------------------------
+
+// Returns a 4-element object array: {long[] meta, float[] positions,
+// float[] uvs, int[] indices}. meta holds 6 entries per draw sequence:
+// {atlasTexturePtr, imageType, numVertices, numIndices, vertexStart,
+// indexStart}; positions/uvs are (x, y) pairs in vertex order, indices are
+// relative to each sequence's vertexStart.
+TTFJNI_FUNC(jobjectArray) TTFJNI_NAME(gpuDrawData)(JNIEnv *env, jclass, jlong text) {
+    TTF_GPUAtlasDrawSequence *seq = TTF_GetGPUTextDrawData(ttf_jni_text(text));
+    if (!seq) {
+        return nullptr;
+    }
+
+    std::vector<jlong> meta;
+    std::vector<jfloat> positions;
+    std::vector<jfloat> uvs;
+    std::vector<jint> indices;
+    int vertexStart = 0;
+    int indexStart = 0;
+    for (TTF_GPUAtlasDrawSequence *s = seq; s; s = s->next) {
+        meta.push_back(ttf_jni_ptr(s->atlas_texture));
+        meta.push_back(static_cast<jint>(s->image_type));
+        meta.push_back(s->num_vertices);
+        meta.push_back(s->num_indices);
+        meta.push_back(vertexStart);
+        meta.push_back(indexStart);
+        for (int i = 0; i < s->num_vertices; ++i) {
+            positions.push_back(s->xy[i].x);
+            positions.push_back(s->xy[i].y);
+            uvs.push_back(s->uv[i].x);
+            uvs.push_back(s->uv[i].y);
+        }
+        for (int i = 0; i < s->num_indices; ++i) {
+            indices.push_back(s->indices[i]);
+        }
+        vertexStart += s->num_vertices;
+        indexStart += s->num_indices;
+    }
+
+    jlongArray metaArr = ttf_jni_new_jlong_array(env, meta);
+    jfloatArray posArr = ttf_jni_new_jfloat_array(env, positions);
+    jfloatArray uvArr = ttf_jni_new_jfloat_array(env, uvs);
+    jintArray idxArr = ttf_jni_new_jint_array(env, indices);
+    if (!metaArr || !posArr || !uvArr || !idxArr) {
+        return nullptr;
+    }
+
+    jclass objectClass = env->FindClass("java/lang/Object");
+    jobjectArray result = env->NewObjectArray(4, objectClass, nullptr);
+    if (result) {
+        env->SetObjectArrayElement(result, 0, metaArr);
+        env->SetObjectArrayElement(result, 1, posArr);
+        env->SetObjectArrayElement(result, 2, uvArr);
+        env->SetObjectArrayElement(result, 3, idxArr);
+    }
+    return result;
+}
 
 TTFJNI_FUNC(jlong) TTFJNI_NAME(createText)(JNIEnv *env, jclass, jlong engine, jlong font, jstring text) {
     std::string t = ttf_jni_copy_string(env, text);

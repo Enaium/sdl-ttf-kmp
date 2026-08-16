@@ -576,8 +576,8 @@ TTFJNI_FUNC(jintArray) TTFJNI_NAME(measureString)(JNIEnv *env, jclass, jlong fon
         std::string t = ttf_jni_copy_string(env, text);                                 \
         SDL_Color fg;                                                                   \
         ttf_jni_fill_color(fg, r, g, b, a);                                             \
-        return ttf_jni_ptr(CALL(ttf_jni_font(font), t.c_str(),                          \
-                                t.size(), fg));                     \
+        return ttf_jni_ptr(ttf_jni_to_rgba32(CALL(ttf_jni_font(font), t.c_str(),       \
+                                                    t.size(), fg)));                      \
     }
 
 #define TTF_RENDER_TEXT_BG_FN(NAME, CALL)                                               \
@@ -588,8 +588,8 @@ TTFJNI_FUNC(jintArray) TTFJNI_NAME(measureString)(JNIEnv *env, jclass, jlong fon
         SDL_Color fg, bgc;                                                              \
         ttf_jni_fill_color(fg, r, g, b, a);                                             \
         ttf_jni_fill_color(bgc, br, bg, bb, ba);                                        \
-        return ttf_jni_ptr(CALL(ttf_jni_font(font), t.c_str(),                          \
-                                t.size(), fg, bgc));                 \
+        return ttf_jni_ptr(ttf_jni_to_rgba32(CALL(ttf_jni_font(font), t.c_str(),      \
+                                                    t.size(), fg, bgc)));                \
     }
 
 #define TTF_RENDER_TEXT_WRAPPED_FN(NAME, CALL)                                          \
@@ -599,9 +599,22 @@ TTFJNI_FUNC(jintArray) TTFJNI_NAME(measureString)(JNIEnv *env, jclass, jlong fon
         std::string t = ttf_jni_copy_string(env, text);                                 \
         SDL_Color fg;                                                                   \
         ttf_jni_fill_color(fg, r, g, b, a);                                             \
-        return ttf_jni_ptr(CALL(ttf_jni_font(font), t.c_str(),                          \
-                                t.size(), fg, wrapWidth));           \
+        return ttf_jni_ptr(ttf_jni_to_rgba32(CALL(ttf_jni_font(font), t.c_str(),      \
+                                                    t.size(), fg, wrapWidth)));          \
     }
+
+// SDL_ttf renders into INDEX8 (Solid/Shaded) and ARGB8888 (Blended/LCD)
+// surfaces; normalize them to the endianness-independent RGBA32 so the
+// pixel bytes can be uploaded straight into an R8G8B8A8 texture.
+static SDL_Surface *ttf_jni_to_rgba32(SDL_Surface *surface) {
+    if (!surface) return NULL;
+    if (surface->format == SDL_PIXELFORMAT_RGBA32) {
+        return surface;
+    }
+    SDL_Surface *converted = SDL_ConvertSurface(surface, SDL_PIXELFORMAT_RGBA32);
+    SDL_DestroySurface(surface);
+    return converted;
+}
 
 #define TTF_RENDER_TEXT_BG_WRAPPED_FN(NAME, CALL)                                       \
     TTFJNI_FUNC(jlong) TTFJNI_NAME(NAME)(JNIEnv *env, jclass, jlong font, jstring text, \
@@ -612,8 +625,8 @@ TTFJNI_FUNC(jintArray) TTFJNI_NAME(measureString)(JNIEnv *env, jclass, jlong fon
         SDL_Color fg, bgc;                                                              \
         ttf_jni_fill_color(fg, r, g, b, a);                                             \
         ttf_jni_fill_color(bgc, br, bg, bb, ba);                                        \
-        return ttf_jni_ptr(CALL(ttf_jni_font(font), t.c_str(),                          \
-                                t.size(), fg, bgc, wrapWidth));      \
+        return ttf_jni_ptr(ttf_jni_to_rgba32(CALL(ttf_jni_font(font), t.c_str(),      \
+                                                    t.size(), fg, bgc, wrapWidth)));    \
     }
 
 TTF_RENDER_TEXT_FN(renderTextSolid, TTF_RenderText_Solid)
@@ -640,7 +653,8 @@ TTF_RENDER_TEXT_BG_WRAPPED_FN(renderTextLCDWrapped, TTF_RenderText_LCD_Wrapped)
         SDL_Color fg, bgc;                                                                \
         ttf_jni_fill_color(fg, r, g, b, a);                                               \
         ttf_jni_fill_color(bgc, br, bg, bb, ba);                                          \
-        return ttf_jni_ptr(CALL(ttf_jni_font(font), static_cast<Uint32>(ch), fg, bgc));   \
+        return ttf_jni_ptr(ttf_jni_to_rgba32(CALL(ttf_jni_font(font),                  \
+                                                    static_cast<Uint32>(ch), fg, bgc)));  \
     }
 
 TTF_RENDER_GLYPH_FN(renderGlyphSolid, TTF_RenderGlyph_Solid)

@@ -199,7 +199,7 @@ kotlin {
                 // cn.enaium.sdl types. The dependency is substituted with the
                 // local sdl-kmp project via the composite includeBuild in
                 // settings.gradle.kts.
-                api("cn.enaium.sdl:sdl-kmp:1.0.7")
+                api(libs.sdl.kmp)
             }
         }
 

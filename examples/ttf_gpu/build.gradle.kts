@@ -53,7 +53,7 @@ kotlin {
         commonMain {
             dependencies {
                 implementation(project(":sdl-ttf-kmp"))
-                implementation("cn.enaium.sdl:sdl-kmp:1.0.7")
+                implementation(libs.sdl.kmp)
             }
         }
     }

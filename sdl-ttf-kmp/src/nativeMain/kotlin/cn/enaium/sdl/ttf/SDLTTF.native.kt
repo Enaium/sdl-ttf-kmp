@@ -738,13 +738,25 @@ actual object SDLTTF {
     private fun surfaceOf(ptr: CPointer<SDL_Surface>?): SDLSurface? =
         (ptr?.rawValue?.toLong() ?: 0L).toSDLSurface(owned = true)
 
+    // SDL_ttf renders into INDEX8 (Solid/Shaded) and ARGB8888 (Blended/LCD)
+    // surfaces; normalize them to the endianness-independent RGBA32 so the
+    // pixel bytes can be uploaded straight into an R8G8B8A8 texture.
+    private fun rgba32Surface(ptr: CPointer<SDL_Surface>?): CPointer<SDL_Surface>? {
+        if (ptr == null || ptr.pointed.format == SDL_PIXELFORMAT_RGBA32) {
+            return ptr
+        }
+        val converted = SDL_ConvertSurface(ptr, SDL_PIXELFORMAT_RGBA32)
+        SDL_DestroySurface(ptr)
+        return converted
+    }
+
     actual fun renderTextSolid(font: SDLTTFFont, text: String, fg: SDLColor, wrapWidth: Int): SDLSurface? {
         val f = (font as? NativeSDLTTFFont)?.check()
             ?: throw IllegalArgumentException("font is not a native SDL_ttf font")
         val surf = if (wrapWidth > 0) {
-            TTF_RenderText_Solid_Wrapped(f, text, 0u, fg.toCValue(), wrapWidth)
+            rgba32Surface(TTF_RenderText_Solid_Wrapped(f, text, 0u, fg.toCValue(), wrapWidth))
         } else {
-            TTF_RenderText_Solid(f, text, 0u, fg.toCValue())
+            rgba32Surface(TTF_RenderText_Solid(f, text, 0u, fg.toCValue()))
         }
         return surfaceOf(surf)
     }
@@ -753,9 +765,9 @@ actual object SDLTTF {
         val f = (font as? NativeSDLTTFFont)?.check()
             ?: throw IllegalArgumentException("font is not a native SDL_ttf font")
         val surf = if (wrapWidth > 0) {
-            TTF_RenderText_Shaded_Wrapped(f, text, 0u, fg.toCValue(), bg.toCValue(), wrapWidth)
+            rgba32Surface(TTF_RenderText_Shaded_Wrapped(f, text, 0u, fg.toCValue(), bg.toCValue(), wrapWidth))
         } else {
-            TTF_RenderText_Shaded(f, text, 0u, fg.toCValue(), bg.toCValue())
+            rgba32Surface(TTF_RenderText_Shaded(f, text, 0u, fg.toCValue(), bg.toCValue()))
         }
         return surfaceOf(surf)
     }
@@ -764,9 +776,9 @@ actual object SDLTTF {
         val f = (font as? NativeSDLTTFFont)?.check()
             ?: throw IllegalArgumentException("font is not a native SDL_ttf font")
         val surf = if (wrapWidth > 0) {
-            TTF_RenderText_Blended_Wrapped(f, text, 0u, fg.toCValue(), wrapWidth)
+            rgba32Surface(TTF_RenderText_Blended_Wrapped(f, text, 0u, fg.toCValue(), wrapWidth))
         } else {
-            TTF_RenderText_Blended(f, text, 0u, fg.toCValue())
+            rgba32Surface(TTF_RenderText_Blended(f, text, 0u, fg.toCValue()))
         }
         return surfaceOf(surf)
     }
@@ -775,9 +787,9 @@ actual object SDLTTF {
         val f = (font as? NativeSDLTTFFont)?.check()
             ?: throw IllegalArgumentException("font is not a native SDL_ttf font")
         val surf = if (wrapWidth > 0) {
-            TTF_RenderText_LCD_Wrapped(f, text, 0u, fg.toCValue(), bg.toCValue(), wrapWidth)
+            rgba32Surface(TTF_RenderText_LCD_Wrapped(f, text, 0u, fg.toCValue(), bg.toCValue(), wrapWidth))
         } else {
-            TTF_RenderText_LCD(f, text, 0u, fg.toCValue(), bg.toCValue())
+            rgba32Surface(TTF_RenderText_LCD(f, text, 0u, fg.toCValue(), bg.toCValue()))
         }
         return surfaceOf(surf)
     }
@@ -785,25 +797,25 @@ actual object SDLTTF {
     actual fun renderGlyphSolid(font: SDLTTFFont, ch: Int, fg: SDLColor): SDLSurface? {
         val f = (font as? NativeSDLTTFFont)?.check()
             ?: throw IllegalArgumentException("font is not a native SDL_ttf font")
-        return surfaceOf(TTF_RenderGlyph_Solid(f, ch.toUInt(), fg.toCValue()))
+        return surfaceOf(rgba32Surface(TTF_RenderGlyph_Solid(f, ch.toUInt(), fg.toCValue())))
     }
 
     actual fun renderGlyphShaded(font: SDLTTFFont, ch: Int, fg: SDLColor, bg: SDLColor): SDLSurface? {
         val f = (font as? NativeSDLTTFFont)?.check()
             ?: throw IllegalArgumentException("font is not a native SDL_ttf font")
-        return surfaceOf(TTF_RenderGlyph_Shaded(f, ch.toUInt(), fg.toCValue(), bg.toCValue()))
+        return surfaceOf(rgba32Surface(TTF_RenderGlyph_Shaded(f, ch.toUInt(), fg.toCValue(), bg.toCValue())))
     }
 
     actual fun renderGlyphBlended(font: SDLTTFFont, ch: Int, fg: SDLColor): SDLSurface? {
         val f = (font as? NativeSDLTTFFont)?.check()
             ?: throw IllegalArgumentException("font is not a native SDL_ttf font")
-        return surfaceOf(TTF_RenderGlyph_Blended(f, ch.toUInt(), fg.toCValue()))
+        return surfaceOf(rgba32Surface(TTF_RenderGlyph_Blended(f, ch.toUInt(), fg.toCValue())))
     }
 
     actual fun renderGlyphLCD(font: SDLTTFFont, ch: Int, fg: SDLColor, bg: SDLColor): SDLSurface? {
         val f = (font as? NativeSDLTTFFont)?.check()
             ?: throw IllegalArgumentException("font is not a native SDL_ttf font")
-        return surfaceOf(TTF_RenderGlyph_LCD(f, ch.toUInt(), fg.toCValue(), bg.toCValue()))
+        return surfaceOf(rgba32Surface(TTF_RenderGlyph_LCD(f, ch.toUInt(), fg.toCValue(), bg.toCValue())))
     }
 
     actual fun getGlyphImage(font: SDLTTFFont, ch: Int): SDLSurface? {

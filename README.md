@@ -156,4 +156,6 @@ Both workflows are **manually triggered** (Actions tab):
 
 ## License
 
-Zlib (same as SDL_ttf and SDL3).
+## License
+
+MIT. The bundled SDL3 submodule is licensed under the [zlib license](https://github.com/libsdl-org/SDL/blob/main/LICENSE.txt).

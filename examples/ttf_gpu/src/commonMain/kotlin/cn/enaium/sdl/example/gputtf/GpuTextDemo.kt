@@ -275,7 +275,9 @@ class GpuTextDemo(
         checkNotNull(surface) { "surface render of '$label' failed: ${SDLTTF.error()}" }
         val tex = device.createTexture(
             SDLGPUTextureCreateInfo(
-                format = SDLGPUTextureFormat.B8G8R8A8_UNORM,
+                // R8G8B8A8 matches the RGBA32 pixel layout the surface
+                // renderers are normalized to (endianness-independent).
+                format = SDLGPUTextureFormat.R8G8B8A8_UNORM,
                 usage = SDLGPUTextureUsage.SAMPLE,
                 width = surface.width,
                 height = surface.height,

@@ -244,3 +244,11 @@ jobs:
 
       - name: Run JVM tests
         run: ./gradlew --no-daemon --stacktrace :sdl-ttf-kmp:jvmTest
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-windows
+          path: sdl-ttf-kmp/build/reports/tests
+          if-no-files-found: ignore

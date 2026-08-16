@@ -22,7 +22,6 @@
 
 package cn.enaium.sdl.ttf
 
-import cn.enaium.sdl.SDLColor
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -58,26 +57,6 @@ class SDLTTFCommonTest {
         assertTrue(font.ascent > 0, "ascent: ${font.ascent}")
         assertNotNull(font.familyName, "familyName (font: $fontPath)")
         val helloSize = font.getStringSize("Hello")
-        if (helloSize == null) {
-            // Diagnostics for the Windows runner (see the test reports).
-            SDLTTF.clearError()
-            println("DIAG: 1st getStringSize(Hello) = ${font.getStringSize("Hello")} err=${SDLTTF.error()}")
-            SDLTTF.clearError()
-            println("DIAG: 2nd getStringSize(Hello) = ${font.getStringSize("Hello")} err=${SDLTTF.error()}")
-            SDLTTF.clearError()
-            println("DIAG: glyphMetrics('H') = ${font.getGlyphMetrics('H'.code)} err=${SDLTTF.error()}")
-            val r1 = SDLTTF.renderTextBlended(font, "Hello", SDLColor(255, 255, 255))
-            println("DIAG: 1st renderTextBlended(Hello) = ${r1 != null} err=${SDLTTF.error()}")
-            r1?.close()
-            SDLTTF.clearError()
-            val r2 = SDLTTF.renderTextBlended(font, "Hello", SDLColor(255, 255, 255))
-            println("DIAG: 2nd renderTextBlended(Hello) = ${r2 != null} err=${SDLTTF.error()}")
-            r2?.close()
-            val font2 = SDLTTF.openFont(fontPath, 24f)
-            SDLTTF.clearError()
-            println("DIAG: font2 1st getStringSize(Hi) = ${font2.getStringSize("Hi")} err=${SDLTTF.error()}")
-            font2.close()
-        }
         assertTrue(
             helloSize?.x ?: 0 > 0,
             "getStringSize(\"Hello\") failed: ${SDLTTF.error()} (font: $fontPath)",

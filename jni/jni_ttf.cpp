@@ -274,6 +274,16 @@ static bool SDLCALL ttf_jni_fontbuf_close(void *userdata) {
     return true;
 }
 
+// A fresh font's first shaping/measurement call can fail once on Windows
+// (SDL reports "Out of memory", likely a lazy-init glitch in the second SDL3
+// copy); every retry succeeds. Perform one throwaway measurement so the
+// first user-visible call always works.
+static void ttf_jni_warmup_font(TTF_Font *font) {
+    int w = 0, h = 0;
+    TTF_GetStringSize(font, " ", 1, &w, &h);
+    SDL_ClearError();
+}
+
 TTFJNI_FUNC(jlong) TTFJNI_NAME(openFont)(JNIEnv *env, jclass, jstring path, jfloat ptsize) {
     std::string p = ttf_jni_copy_string(env, path);
 
@@ -323,16 +333,28 @@ TTFJNI_FUNC(jlong) TTFJNI_NAME(openFont)(JNIEnv *env, jclass, jstring path, jflo
     // closeio=true: the font closes the stream (and thus frees the buffer)
     // when it is closed; TTF_CopyFont shares the stream through a refcount,
     // so the buffer outlives all fonts referencing it.
-    return ttf_jni_ptr(TTF_OpenFontIO(mem, true, ptsize));
+    TTF_Font *font = TTF_OpenFontIO(mem, true, ptsize);
+    if (font) {
+        ttf_jni_warmup_font(font);
+    }
+    return ttf_jni_ptr(font);
 }
 
 TTFJNI_FUNC(jlong) TTFJNI_NAME(openFontIO)(JNIEnv *, jclass, jlong stream, jboolean closeio, jfloat ptsize) {
     auto *s = reinterpret_cast<SDL_IOStream *>(static_cast<intptr_t>(stream));
-    return ttf_jni_ptr(TTF_OpenFontIO(s, closeio == JNI_TRUE, ptsize));
+    TTF_Font *font = TTF_OpenFontIO(s, closeio == JNI_TRUE, ptsize);
+    if (font) {
+        ttf_jni_warmup_font(font);
+    }
+    return ttf_jni_ptr(font);
 }
 
 TTFJNI_FUNC(jlong) TTFJNI_NAME(copyFont)(JNIEnv *, jclass, jlong font) {
-    return ttf_jni_ptr(TTF_CopyFont(ttf_jni_font(font)));
+    TTF_Font *copy = TTF_CopyFont(ttf_jni_font(font));
+    if (copy) {
+        ttf_jni_warmup_font(copy);
+    }
+    return ttf_jni_ptr(copy);
 }
 
 TTFJNI_FUNC(void) TTFJNI_NAME(closeFont)(JNIEnv *, jclass, jlong font) {

@@ -12,6 +12,6 @@ layout(location = 0) out vec4 outColor;
 
 void main() {
     float d = texture(atlas, vUV).a;
-    float alpha = smoothstep(0.5 - 0.05, 0.5 + 0.05, d);
+    float alpha = smoothstep(0.4375, 0.5625, d);
     outColor = vec4(vColor.rgb, alpha);
 }

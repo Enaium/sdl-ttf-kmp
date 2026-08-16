@@ -344,7 +344,7 @@ class GpuTextDemo(
             collectText(cjk, 40f, 220f, 0.0, 1f, SDLColor(255, 200, 100), vw, vh)?.let { batches += it }
             collectText(styled, 40f, 300f, 0.0, 1f, SDLColor(160, 220, 160), vw, vh)?.let { batches += it }
             val sdfScale = if (sdfAnimate) 1f + 0.25f * kotlin.math.sin(angle / 30.0).toFloat() else 1f
-            collectText(sdfText, 40f, 360f, 0.0, sdfScale, SDLColor(255, 255, 255), vw, vh)?.let { batches += it }
+            collectText(sdfText, 40f, 360f, 0.0, sdfScale, SDLColor(255, 255, 255), vw, vh, sdf = true)?.let { batches += it }
             var y = 470f
             for ((texture, size) in surfaceTextures) {
                 batches += collectQuad(texture, 40f, y, size.first.toFloat(), size.second.toFloat(), vw, vh)
@@ -421,6 +421,7 @@ class GpuTextDemo(
         color: SDLColor,
         vw: Float,
         vh: Float,
+        sdf: Boolean = false,
     ): DrawBatch? {
         val sequences = text.getGPUDrawData() ?: return null
         val rad = angle * kotlin.math.PI / 180.0
@@ -458,6 +459,11 @@ class GpuTextDemo(
         val draws = ArrayList<SequenceDraw>()
         var firstIndex = 0
         for (sequence in sequences) {
+            // Empty glyphs (e.g. spaces) come back with image type INVALID
+            // and a 1x1 surface; SDL_ttf pads them into the atlas with a
+            // pitch-mismatched copy that can smear stale atlas data into a
+            // grey square, so skip them entirely (there is nothing to draw).
+            if (sequence.imageType == SDLTTFImageType.INVALID) continue
             val positions = sequence.positions
             val uvs = sequence.uvs
             val numVertices = positions.size / 2
@@ -491,7 +497,7 @@ class GpuTextDemo(
                 indices[indexCount + i] = sequence.indices[i] + base
             }
             indexCount += sequence.indices.size
-            draws.add(SequenceDraw(sequence.atlasTexture, sequence.imageType, firstIndex, sequence.indices.size))
+            draws.add(SequenceDraw(sequence.atlasTexture, sequence.imageType, firstIndex, sequence.indices.size, sdf))
             firstIndex += sequence.indices.size
         }
         if (vertexCount == 0) return null
@@ -550,18 +556,16 @@ class GpuTextDemo(
         val indexStart = batch.indexByteOffset / 2
         var atlas: SDLGPUTexture? = null
         var lastImageType = -1
+        var lastSdf = false
         for (draw in batch.draws) {
             val seq = draw as SequenceDraw
             val atlasTexture = seq.atlasTexture ?: continue
             val imageType = seq.imageType
-            if (atlas != atlasTexture || imageType != lastImageType) {
+            if (atlas != atlasTexture || imageType != lastImageType || seq.sdf != lastSdf) {
                 atlas = atlasTexture
                 lastImageType = imageType
-                if (imageType == SDLTTFImageType.SDF) {
-                    pass.bindGraphicsPipeline(sdfPipeline)
-                } else {
-                    pass.bindGraphicsPipeline(textPipeline)
-                }
+                lastSdf = seq.sdf
+                pass.bindGraphicsPipeline(if (seq.sdf) sdfPipeline else textPipeline)
                 pass.bindGraphicsTextureSamplers(0, atlas to sampler)
             }
             pass.drawIndexedPrimitives(
@@ -604,6 +608,7 @@ class GpuTextDemo(
         val imageType: Int,
         val firstIndex: Int,
         val indexCount: Int,
+        val sdf: Boolean,
     )
 
     private class QuadDraw(val texture: SDLGPUTexture)

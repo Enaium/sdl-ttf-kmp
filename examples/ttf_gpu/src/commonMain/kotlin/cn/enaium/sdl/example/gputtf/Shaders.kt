@@ -340,7 +340,7 @@ fragment float4 fs_main(FSInput in [[stage_in]],
                         texture2d<float> atlas [[texture(0)]],
                         sampler atlasSampler [[sampler(0)]]) {
     float d = atlas.sample(atlasSampler, in.uv).a;
-    float alpha = smoothstep(0.45, 0.55, d);
+    float alpha = smoothstep(0.4375, 0.5625, d);
     return float4(in.color.rgb, alpha);
 }
 """

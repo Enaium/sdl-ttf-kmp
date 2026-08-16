@@ -108,6 +108,10 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
+            libx11-dev libxext-dev libxcursor-dev libxi-dev libxfixes-dev \
+            libxrandr-dev libxrender-dev libxss-dev libxtst-dev \
+            libwayland-dev libwayland-bin libxkbcommon-dev libegl-dev libdecor-0-dev \
+            libpipewire-0.3-dev libpulse-dev libasound2-dev \
             gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 \
             gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 

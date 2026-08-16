@@ -53,12 +53,19 @@ class SDLTTFCommonTest {
         }
 
         val font = SDLTTF.openFont(fontPath, 24f)
-        assertTrue(font.height > 0)
-        assertTrue(font.ascent > 0)
-        assertNotNull(font.familyName)
-        assertTrue(font.getStringSize("Hello")?.x ?: 0 > 0)
-        assertNotNull(font.measureString("Hello", 100))
-        assertTrue(font.hasGlyph('A'.code) || font.hasGlyph('文'.code))
+        assertTrue(font.height > 0, "height: ${font.height}")
+        assertTrue(font.ascent > 0, "ascent: ${font.ascent}")
+        assertNotNull(font.familyName, "familyName (font: $fontPath)")
+        val helloSize = font.getStringSize("Hello")
+        assertTrue(
+            helloSize?.x ?: 0 > 0,
+            "getStringSize(\"Hello\") failed: ${SDLTTF.error()} (font: $fontPath)",
+        )
+        assertNotNull(font.measureString("Hello", 100), "measureString: ${SDLTTF.error()}")
+        assertTrue(
+            font.hasGlyph('A'.code) || font.hasGlyph('文'.code),
+            "hasGlyph failed: ${SDLTTF.error()} (font: $fontPath)",
+        )
         font.close()
 
         SDLTTF.quit()

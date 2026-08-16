@@ -200,6 +200,10 @@ TTFJNI_FUNC(jstring) TTFJNI_NAME(getError)(JNIEnv *env, jclass) {
     return ttf_jni_to_string(env, SDL_GetError());
 }
 
+TTFJNI_FUNC(void) TTFJNI_NAME(clearError)(JNIEnv *, jclass) {
+    SDL_ClearError();
+}
+
 TTFJNI_FUNC(jboolean) TTFJNI_NAME(setError)(JNIEnv *env, jclass, jstring message) {
     std::string msg = ttf_jni_copy_string(env, message);
     return SDL_SetError("%s", msg.c_str()) ? JNI_TRUE : JNI_FALSE;

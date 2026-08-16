@@ -384,6 +384,10 @@ actual object SDLTTF {
 
     actual fun error(): String? = Jni.getError()?.takeIf { it.isNotEmpty() }
 
+    actual fun clearError() {
+        Jni.clearError()
+    }
+
     actual fun openFont(path: String, pointSize: Float): SDLTTFFont {
         val font = Jni.openFont(path, pointSize)
         check(font != 0L) { "TTF_OpenFont failed: ${SDLTTF.error()}" }

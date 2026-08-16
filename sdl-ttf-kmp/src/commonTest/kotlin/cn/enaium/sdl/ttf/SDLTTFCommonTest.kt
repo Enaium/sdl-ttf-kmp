@@ -23,7 +23,6 @@
 package cn.enaium.sdl.ttf
 
 import cn.enaium.sdl.SDLColor
-import cn.enaium.sdl.ttf.SDLTTFHinting
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -61,20 +60,23 @@ class SDLTTFCommonTest {
         val helloSize = font.getStringSize("Hello")
         if (helloSize == null) {
             // Diagnostics for the Windows runner (see the test reports).
-            println("DIAG: getStringSize failed: ${SDLTTF.error()}")
+            SDLTTF.clearError()
+            println("DIAG: 1st getStringSize(Hello) = ${font.getStringSize("Hello")} err=${SDLTTF.error()}")
+            SDLTTF.clearError()
+            println("DIAG: 2nd getStringSize(Hello) = ${font.getStringSize("Hello")} err=${SDLTTF.error()}")
+            SDLTTF.clearError()
             println("DIAG: glyphMetrics('H') = ${font.getGlyphMetrics('H'.code)} err=${SDLTTF.error()}")
-            font.hinting = SDLTTFHinting.NONE
-            println("DIAG: hinting=NONE getStringSize = ${font.getStringSize("H")} err=${SDLTTF.error()}")
-            font.hinting = SDLTTFHinting.NORMAL
-            println("DIAG: size=${font.size} family=${font.familyName} style=${font.style} kerning=${font.kerning}")
-            println("DIAG: wrapped = ${font.getStringSizeWrapped("H", 100)} err=${SDLTTF.error()}")
-            println("DIAG: measure = ${font.measureString("H", 100)} err=${SDLTTF.error()}")
-            val glyphSurf = SDLTTF.renderGlyphBlended(font, 'H'.code, SDLColor(255, 255, 255))
-            println("DIAG: renderGlyphBlended(H) = ${glyphSurf != null} err=${SDLTTF.error()}")
-            glyphSurf?.close()
-            val blended = SDLTTF.renderTextBlended(font, "H", SDLColor(255, 255, 255))
-            println("DIAG: renderTextBlended(H) = ${blended != null} err=${SDLTTF.error()}")
-            blended?.close()
+            val r1 = SDLTTF.renderTextBlended(font, "Hello", SDLColor(255, 255, 255))
+            println("DIAG: 1st renderTextBlended(Hello) = ${r1 != null} err=${SDLTTF.error()}")
+            r1?.close()
+            SDLTTF.clearError()
+            val r2 = SDLTTF.renderTextBlended(font, "Hello", SDLColor(255, 255, 255))
+            println("DIAG: 2nd renderTextBlended(Hello) = ${r2 != null} err=${SDLTTF.error()}")
+            r2?.close()
+            val font2 = SDLTTF.openFont(fontPath, 24f)
+            SDLTTF.clearError()
+            println("DIAG: font2 1st getStringSize(Hi) = ${font2.getStringSize("Hi")} err=${SDLTTF.error()}")
+            font2.close()
         }
         assertTrue(
             helloSize?.x ?: 0 > 0,

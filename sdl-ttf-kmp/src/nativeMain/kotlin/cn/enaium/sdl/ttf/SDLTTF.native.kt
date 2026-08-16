@@ -613,6 +613,10 @@ actual object SDLTTF {
 
     actual fun error(): String? = SDL_GetError()?.toKString()?.takeIf { it.isNotEmpty() }
 
+    actual fun clearError() {
+        SDL_ClearError()
+    }
+
     actual fun openFont(path: String, pointSize: Float): SDLTTFFont {
         val font = TTF_OpenFont(path, pointSize)
             ?: throw IllegalStateException("TTF_OpenFont failed: ${SDLTTF.error()}")

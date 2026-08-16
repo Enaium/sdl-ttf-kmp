@@ -358,6 +358,9 @@ expect object SDLTTF {
     /** The last error set by SDL_ttf, or null if there is none. */
     fun error(): String?
 
+    /** Clears the last error set by SDL_ttf. */
+    fun clearError()
+
     /**
      * Opens the font at [path] with the given [pointSize] and returns it, or
      * throws an exception describing the SDL error.

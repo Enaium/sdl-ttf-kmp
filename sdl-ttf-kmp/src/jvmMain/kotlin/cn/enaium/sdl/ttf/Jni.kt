@@ -55,6 +55,7 @@ internal object Jni {
     external fun getFreeTypeVersion(): IntArray
     external fun getHarfBuzzVersion(): IntArray
     external fun getError(): String?
+    external fun clearError()
     external fun setError(message: String): Boolean
 
     // =========================================================================

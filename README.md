@@ -4,14 +4,14 @@ Kotlin Multiplatform bindings for [SDL_ttf 3](https://github.com/libsdl-org/SDL_
 
 Two implementations, mirroring sdl-kmp:
 
-- **JVM**: SDL_ttf (with the vendored FreeType/HarfBuzz/plutosvg from this repository's `SDL_ttf` submodule) is compiled by CMake (`jni/`) into a JNI shared library (`libsdl_ttf_jni`), shipped as per-OS/arch `sdl-ttf-kmp-jni-jvm-*` artifacts. The library deliberately does **not** link SDL3: its SDL3 symbols are resolved at dlopen time from `libsdl_jni` (the JNI library of the sdl-kmp JVM artifact), so the process keeps a single SDL3 instance and the sdl-kmp error/event state is shared. `TtfNativeLoader` extracts the matching binary at runtime; `Jni` forces `libsdl_jni` to load first.
+- **JVM**: SDL3 and SDL_ttf (with the vendored FreeType/HarfBuzz/plutosvg from this repository's `SDL_ttf` submodule) are compiled by CMake (`jni/`) into a JNI shared library (`libsdl_ttf_jni`), shipped as per-OS/arch `sdl-ttf-kmp-jni-jvm-*` artifacts — the same self-contained approach as sdl-kmp's `libsdl_jni`. `TtfNativeLoader` extracts the matching binary at runtime. The process contains a second SDL3 copy; SDL_ttf errors are read through the TTF-side `SDL_GetError` (`SDLTTF.error()`), and SDL objects from the sdl-kmp library are operated on through SDL3's function-pointer interfaces, so the copies do not interfere.
 - **Native (Kotlin/Native)**: the SDL_ttf static library (including FreeType/HarfBuzz/plutosvg) is compiled per target with CMake and **embedded into the published klib**. SDL3 itself is not compiled: the SDL3 symbols are resolved at the consumer's final link from the sdl-kmp klib, which is always present because the bindings use the `cn.enaium.sdl` types.
 
 ## Supported platforms
 
 | Platform | Targets                                             | Implementation                                  |
 |----------|-----------------------------------------------------|-------------------------------------------------|
-| JVM      | `jvm` (Linux/macOS/Windows)                         | JNI shared library (`libsdl_ttf_jni`), SDL_ttf compiled from source; SDL3 symbols resolved from `libsdl_jni` |
+| JVM      | `jvm` (Linux/macOS/Windows)                         | JNI shared library (`libsdl_ttf_jni`), SDL3 + SDL_ttf compiled from source |
 | macOS    | `macosArm64`, `macosX64`                            | cinterop + embedded static SDL_ttf              |
 | Linux    | `linuxX64`, `linuxArm64`                            | cinterop + embedded static SDL_ttf              |
 | Windows  | `mingwX64`                                          | cinterop + embedded static SDL_ttf              |
@@ -100,7 +100,7 @@ fun main() {
 
 - **Kotlin version compatibility**: the published klibs are built with Kotlin 2.4.x. Keep the consumer's Kotlin version in sync (the same rule applies to sdl-kmp).
 - **macOS JVM**: requires `-XstartOnFirstThread` (the example `jvmRun` task already sets it). With a HiDPI window, rasterize text at `sizeInPixels / size` and draw at logical size for crisp output (the example does this; see `TTFTextDemo.dpiScale`).
-- **JVM native library**: the matching `sdl-ttf-kmp-jni-jvm-{os}-{arch}` artifact is a transitive runtime dependency; `TtfNativeLoader` extracts `libsdl_ttf_jni` and `System.load()`s it. `libsdl_ttf_jni` resolves its SDL3 symbols from `libsdl_jni`, so the sdl-kmp JVM artifact must be on the classpath (it always is, since the bindings depend on it).
+- **JVM native library**: the matching `sdl-ttf-kmp-jni-jvm-{os}-{arch}` artifact is a transitive runtime dependency; `TtfNativeLoader` extracts `libsdl_ttf_jni` and `System.load()`s it. `libsdl_ttf_jni` bundles its own SDL3, so no `java.library.path` setup is needed.
 - **Text textures**: `SDLTexture.createTextureFromSurface` downcasts the surface to sdl-kmp's internal implementation, so SDL_ttf-rendered surfaces must be uploaded with `createTexture` + `SDLTexture.update` instead.
 - **Android**: building an `androidNative*` target requires an installed Android NDK (found under `$ANDROID_HOME/ndk`); the SDL_ttf static library is cross-compiled with its CMake toolchain.
 - **Headless / CI**: set `SDL_VIDEO_DRIVER=dummy` (hint or environment variable) to run without a display; SDL_ttf itself does not need video.

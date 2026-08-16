@@ -35,8 +35,9 @@ import java.security.MessageDigest
  * matches the host (a developer workflow places the lib on
  * `java.library.path`).
  *
- * The library references the SDL3 symbols exported by libsdl_jni (the sdl-kmp
- * JNI library), which must be loaded first; [Jni] enforces this.
+ * The library bundles its own SDL3 (like sdl-kmp's libsdl_jni); [Jni] still
+ * initializes sdl-kmp first so the SDL3 bindings are ready when the TTF
+ * library is used.
  */
 internal object TtfNativeLoader {
     private const val LIB_NAME = "sdl_ttf_jni"

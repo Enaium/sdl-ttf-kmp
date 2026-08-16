@@ -23,20 +23,18 @@
 /*
  * JNI bridge for the sdl-ttf-kmp JVM target.
  *
- * Every `external fun` on the Kotlin `cn.enaium.sdl.ttf.Jni` object maps 1:1 to
- * a `Java_cn.enaium.sdl.ttf_Jni_<name>` function in this file (see the naming
- * convention in sdl-kmp's jni_bridge.h).
+ * Every `external fun` on the Kotlin `cn.enaium.sdl.ttf.Jni` object maps 1:1
+ * to a `Java_cn_enaium_sdl_ttf_Jni_<name>` function in this file (see the
+ * naming convention in sdl-kmp's jni_bridge.h).
  *
- * The library is built WITHOUT linking SDL3: TTF_Font, TTF_TextEngine,
- * TTF_Text and the SDL_* handles are passed across as opaque 64-bit pointers,
- * and every SDL3 symbol used by SDL_ttf is resolved at dlopen time from
- * libsdl_jni (the sdl-kmp JNI library, which must be loaded first).
+ * The library statically links its own SDL3 and SDL_ttf (like sdl-kmp's
+ * libsdl_jni), so TTF_Font, TTF_TextEngine, TTF_Text and the SDL_* handles
+ * are passed across as opaque 64-bit pointers and the copies of SDL3 in the
+ * process do not interfere (see jni/CMakeLists.txt).
  *
  * Error convention: on failure the TTF functions set SDL's error string
- * (SDL_GetError). [Java_cn.enaium.sdl.ttf_Jni_getError] reads it from the TTF
- * side, which is the copy of SDL3 the error was written to on every platform
- * (on macOS/Linux the SDL calls are interposed to libsdl_jni's copy, on
- * Windows SDL3 is duplicated inside this library).
+ * (SDL_GetError). [Java_cn_enaium_sdl_ttf_Jni_getError] reads it from the
+ * TTF-side copy of SDL3, which is the copy the error was written to.
  */
 
 #include <jni.h>

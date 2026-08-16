@@ -8,27 +8,16 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Builds the JNI shared library (libsdl_ttf_jni) for the JVM target.
 #
-# SDL_ttf (with the vendored FreeType/HarfBuzz/plutosvg) is compiled statically
-# into the library; how SDL3 is provided differs per platform, see below.
+# SDL3 and SDL_ttf (with the vendored FreeType/HarfBuzz/plutosvg) are compiled
+# statically and linked into the library, exactly like sdl-kmp's libsdl_jni.
+# The process therefore contains a second SDL3 instance; this is safe because
 #
-# libsdl_jni must be loaded before libsdl_ttf_jni on the platforms where the
-# SDL3 symbols are resolved at dlopen time; the Kotlin Jni object enforces
-# this (see Jni.kt).
-#
-# SDL3 handling differs per platform:
-#
-#  - macOS/Linux: SDL3 is NOT linked. SDL_ttf only needs the SDL3 headers to
-#    compile, and the SDL3 symbols stay undefined so they are resolved at
-#    dlopen time from libsdl_jni, the JNI library shipped by the sdl-kmp
-#    project (which statically links the real SDL3). This keeps a single
-#    SDL3 instance per process so global state (errors, hints, the event
-#    queue, ...) is shared with the SDL3 bindings. libsdl_jni must therefore
-#    be loaded before libsdl_ttf_jni; the Kotlin Jni object enforces this.
-#  - Windows: MinGW's linker refuses undefined symbols when creating a DLL,
-#    so SDL3 is compiled and linked into the library there (a second SDL3
-#    copy in the process). The TTF-side SDL_GetError is read through
-#    getError(), and cross-library SDL object calls go through SDL3's
-#    function-pointer interfaces, so the copies do not interfere.
+#  - SDL_ttf errors are always read through the TTF-side SDL_GetError
+#    (SDLTTF.error()), which is the copy the errors were written to;
+#  - SDL objects created by the sdl-kmp library (renderers, surfaces,
+#    streams) are only operated on through SDL3's function-pointer
+#    interfaces, which point into the creating library's copy, so both
+#    copies stay consistent.
 if(NOT DEFINED SDL_SOURCE_DIR)
     set(SDL_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../includes/SDL")
 endif()
@@ -36,24 +25,15 @@ if(NOT DEFINED SDLTTF_SOURCE_DIR)
     set(SDLTTF_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../includes/SDL_ttf")
 endif()
 
-if(WIN32)
-    set(SDL_SHARED OFF CACHE BOOL "" FORCE)
-    set(SDL_STATIC ON CACHE BOOL "" FORCE)
-    set(SDL_TEST OFF CACHE BOOL "" FORCE)
-    set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
-    set(SDL_TESTS OFF CACHE BOOL "" FORCE)
-    set(SDL_INSTALL OFF CACHE BOOL "" FORCE)
-    add_subdirectory(${SDL_SOURCE_DIR} SDL)
-else()
-    # Fake SDL3 targets so SDL_ttf's CMake configures without building SDL3.
-    # SDL3::Headers provides the include directory; SDL3::SDL3 is never
-    # actually linked into sdl_ttf_jni (we use the archive file directly
-    # below), so an INTERFACE target with no location is enough.
-    add_library(SDL3::Headers INTERFACE IMPORTED)
-    set_target_properties(SDL3::Headers PROPERTIES
-        INTERFACE_INCLUDE_DIRECTORIES "${SDL_SOURCE_DIR}/include")
-    add_library(SDL3::SDL3 INTERFACE IMPORTED)
-endif()
+set(SDL_SHARED OFF CACHE BOOL "" FORCE)
+set(SDL_STATIC ON CACHE BOOL "" FORCE)
+set(SDL_TEST OFF CACHE BOOL "" FORCE)
+set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(SDL_TESTS OFF CACHE BOOL "" FORCE)
+set(SDL_INSTALL OFF CACHE BOOL "" FORCE)
+set(SDL_INSTALL_DOCS OFF CACHE BOOL "" FORCE)
+
+add_subdirectory(${SDL_SOURCE_DIR} SDL)
 
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(SDLTTF_VENDORED ON CACHE BOOL "" FORCE)
@@ -87,41 +67,17 @@ if(JNI_INCLUDE_DIR_PLATFORM)
     target_include_directories(sdl_ttf_jni PRIVATE ${JNI_INCLUDE_DIR_PLATFORM})
 endif()
 
-if(WIN32)
-    # Link the SDL3_ttf target (not the archive file): its LINK_ONLY
-    # interface pulls in SDL3-static plus the Windows system libraries.
-    target_link_libraries(sdl_ttf_jni PRIVATE SDL3_ttf-static)
-else()
-    # Link the SDL3_ttf archive file directly (not the target) so SDL3 does
-    # not get linked in: its symbols must stay undefined for runtime
-    # resolution from libsdl_jni. SDL3_ttf-static already contains the
-    # vendored freetype, harfbuzz and plutosvg objects (SDL_ttf's CMake
-    # embeds them via TARGET_OBJECTS when building static).
-    target_link_libraries(sdl_ttf_jni PRIVATE $<TARGET_FILE:SDL3_ttf-static>)
-    # The archive is referenced by file path above (not as a target), so it
-    # has no implicit build dependency; make sure it is built.
-    add_dependencies(sdl_ttf_jni SDL3_ttf-static)
-endif()
+# SDL3_ttf-static already contains the vendored freetype, harfbuzz and
+# plutosvg objects (SDL_ttf's CMake embeds them via TARGET_OBJECTS when
+# building static), and SDL3-static propagates the platform system libraries
+# (the macOS frameworks, the Windows system libraries, -lm/-ldl/-lpthread on
+# Linux) and the harfbuzz backends (CoreText on Apple, usp10/gdi32/rpcrt4 on
+# Windows) are propagated by SDL3_ttf-static's link interface.
+target_link_libraries(sdl_ttf_jni PRIVATE SDL3_ttf-static SDL3-static)
 
-if(APPLE)
-    # Resolve the SDL3 symbols at runtime from libsdl_jni (which is loaded
-    # first, see Jni.kt) instead of failing the link.
-    target_link_options(sdl_ttf_jni PRIVATE -Wl,-undefined,dynamic_lookup)
-    # harfbuzz's CoreText backend.
-    target_link_libraries(sdl_ttf_jni PRIVATE
-        "-framework CoreText"
-        "-framework CoreGraphics"
-        "-framework CoreFoundation")
-elseif(UNIX AND NOT APPLE)
-    # GNU ld allows undefined symbols in shared libraries by default; the
-    # SDL3 symbols are resolved from libsdl_jni at dlopen time.
-    target_link_libraries(sdl_ttf_jni PRIVATE -lm -ldl -lpthread)
-elseif(WIN32)
-    # harfbuzz's uniscribe/GDI backends. MinGW DLLs resolve undefined
-    # externals from already-loaded DLLs (libsdl_jni.dll), which exports the
-    # SDL3 symbols.
-    target_link_libraries(sdl_ttf_jni PRIVATE -lusp10 -lgdi32 -lrpcrt4)
-endif()
+# SDL3-static is linked into a shared library, so it must be compiled
+# position-independent (its default on macOS; required on Linux).
+set_target_properties(SDL3-static PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 if(WIN32)
     set_target_properties(sdl_ttf_jni PROPERTIES PREFIX "")

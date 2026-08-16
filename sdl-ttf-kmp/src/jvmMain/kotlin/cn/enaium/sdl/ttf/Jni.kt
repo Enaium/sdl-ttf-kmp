@@ -25,21 +25,21 @@ package cn.enaium.sdl.ttf
 /**
  * JNI bridge for the JVM target.
  *
- * Every `external fun` maps 1:1 to a `Java_cn.enaium.sdl.ttf_Jni_<name>`
+ * Every `external fun` maps 1:1 to a `Java_cn_enaium_sdl_ttf_Jni_<name>`
  * function in jni/jni_ttf.cpp (see the naming convention in sdl-kmp's
  * jni_bridge.h). All members are public (no `internal` modifier) so their JVM
  * names are not mangled by the Kotlin compiler.
  *
- * The underlying libsdl_ttf_jni shared library references the SDL3 symbols of
- * libsdl_jni (from the sdl-kmp project), so sdl-kmp's JNI library is loaded
- * first in the init block.
+ * The underlying libsdl_ttf_jni shared library statically links its own SDL3
+ * and SDL_ttf copies; the init block still touches sdl-kmp first so
+ * libsdl_jni (and the SDL3 bindings) are usable by the time the TTF library
+ * is loaded.
  */
 internal object Jni {
 
     init {
-        // Force sdl-kmp's Jni object to initialize, loading libsdl_jni and
-        // registering its SDL3 symbols in the process namespace before
-        // libsdl_ttf_jni is dlopen()ed.
+        // Make sure sdl-kmp's Jni object is initialized (loading libsdl_jni)
+        // before libsdl_ttf_jni is dlopen()ed.
         cn.enaium.sdl.SDL.error()
         TtfNativeLoader.load()
     }

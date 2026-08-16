@@ -35,11 +35,26 @@ endif()
 
 if(WIN32 AND DEFINED SDL_JNI_DLL AND EXISTS "${SDL_JNI_DLL}")
     # SDL3::Headers provides the include directory; SDL3::SDL3 is only used
-    # by SDL_ttf's CMake for its find_package check.
+    # by SDL_ttf's CMake for its find_package check. SDL3 itself is not
+    # compiled; its symbols are resolved from libsdl_jni.dll.
     add_library(SDL3::Headers INTERFACE IMPORTED)
     set_target_properties(SDL3::Headers PROPERTIES
         INTERFACE_INCLUDE_DIRECTORIES "${SDL_SOURCE_DIR}/include")
     add_library(SDL3::SDL3 INTERFACE IMPORTED)
+elseif(WIN32)
+    # Fallback (no SDL_JNI_DLL provided): compile SDL3 itself. SDL's own CMake
+    # creates the SDL3::Headers / SDL3::SDL3 alias targets, so the fake
+    # targets must NOT be created here (an existing target would make SDL's
+    # add_library(ALIAS) fail). SDL_ttf is added after SDL so its
+    # `if(NOT TARGET SDL3::Headers OR NOT TARGET SDL3::SDL3)` check skips the
+    # find_package call.
+    set(SDL_SHARED OFF CACHE BOOL "" FORCE)
+    set(SDL_STATIC ON CACHE BOOL "" FORCE)
+    set(SDL_TEST OFF CACHE BOOL "" FORCE)
+    set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(SDL_TESTS OFF CACHE BOOL "" FORCE)
+    set(SDL_INSTALL OFF CACHE BOOL "" FORCE)
+    add_subdirectory(${SDL_SOURCE_DIR} SDL)
 else()
     # Fake SDL3 targets so SDL_ttf's CMake configures without building SDL3.
     add_library(SDL3::Headers INTERFACE IMPORTED)
@@ -101,19 +116,24 @@ elseif(APPLE)
         "-framework CoreGraphics"
         "-framework CoreFoundation")
 elseif(UNIX AND NOT APPLE)
-    # GNU ld allows undefined symbols in shared libraries by default; the
-    # SDL3 symbols are resolved from libsdl_jni at dlopen time.
-    target_link_libraries(sdl_ttf_jni PRIVATE -lm -ldl -lpthread)
+    if(DEFINED SDL_JNI_DLL AND EXISTS "${SDL_JNI_DLL}")
+        # Linking the actual libsdl_jni.so (extracted from the sdl-kmp JVM
+        # artifact by the Gradle build) creates a DT_NEEDED entry, so the
+        # loader resolves the SDL3 symbols regardless of how the JVM loaded
+        # libsdl_jni (RTLD_LOCAL hides its symbols from global lookups).
+        target_link_libraries(sdl_ttf_jni PRIVATE "${SDL_JNI_DLL}")
+    else()
+        # GNU ld allows undefined symbols in shared libraries by default; the
+        # SDL3 symbols are resolved from libsdl_jni at dlopen time.
+        target_link_libraries(sdl_ttf_jni PRIVATE -lm -ldl -lpthread)
+    endif()
 elseif(WIN32)
-    # Fallback (no SDL_JNI_DLL provided): compile and link SDL3 itself.
-    set(SDL_SHARED OFF CACHE BOOL "" FORCE)
-    set(SDL_STATIC ON CACHE BOOL "" FORCE)
-    set(SDL_TEST OFF CACHE BOOL "" FORCE)
-    set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
-    set(SDL_TESTS OFF CACHE BOOL "" FORCE)
-    set(SDL_INSTALL OFF CACHE BOOL "" FORCE)
-    add_subdirectory(${SDL_SOURCE_DIR} SDL)
+    # Fallback (no SDL_JNI_DLL provided): SDL3 was compiled in the
+    # configuration step above; link it. SDL's dynapi stub also defines a
+    # JNI_OnLoad; the first definition (ours, in jni_ttf.cpp) wins with
+    # --allow-multiple-definition.
     target_link_libraries(sdl_ttf_jni PRIVATE SDL3-static)
+    target_link_options(sdl_ttf_jni PRIVATE -Wl,--allow-multiple-definition)
 endif()
 
 if(WIN32)

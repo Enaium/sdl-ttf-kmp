@@ -1,0 +1,6 @@
+[submodule "SDL_ttf"]
+	path = includes/SDL_ttf
+	url = git@github.com:libsdl-org/SDL_ttf.git
+[submodule "SDL"]
+	path = includes/SDL
+	url = https://github.com/libsdl-org/SDL.git

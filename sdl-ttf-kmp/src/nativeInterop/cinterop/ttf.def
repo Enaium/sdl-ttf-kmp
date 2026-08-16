@@ -1,0 +1,23 @@
+package = sdl_ttf
+headers = SDL3_ttf/SDL_ttf.h
+compilerOpts = -std=c11 -DSDL_MAIN_HANDLED
+
+# Platform-specific linker options (suffixes are Kotlin/Native family names,
+# lowercase: osx/ios/tvos/linux/mingw). These are baked into the produced
+# klib and applied when the consumer's final binary is linked.
+#
+# Only the SDL_ttf-specific requirements are listed here; the SDL3 system
+# libraries/frameworks come from the sdl-kmp klib, which the consumer always
+# links (the sdl-ttf-kmp bindings use the cn.enaium.sdl types).
+#
+# harfbuzz's CoreText backend (vendored, compiled into the archive).
+linkerOpts.osx = -framework CoreText -framework CoreGraphics -framework CoreFoundation
+linkerOpts.ios = -framework CoreText -framework CoreGraphics -framework CoreFoundation
+linkerOpts.tvos = -framework CoreText -framework CoreGraphics -framework CoreFoundation
+# freetype/harfbuzz need the C math library and pthreads.
+linkerOpts.linux = -lm -ldl -lpthread
+# harfbuzz's uniscribe/GDI backends.
+linkerOpts.mingw = -lusp10 -lgdi32 -lrpcrt4
+# Android: system libraries for freetype/harfbuzz (the SDL3 ones come from
+# the sdl-kmp klib).
+linkerOpts.android = -landroid -llog -lEGL -lGLESv1_CM -lGLESv2 -lOpenSLES -laaudio -ldl -lm

@@ -528,7 +528,11 @@ TTFJNI_FUNC(jintArray) TTFJNI_NAME(getGlyphKerning)(JNIEnv *env, jclass, jlong f
 TTFJNI_FUNC(jintArray) TTFJNI_NAME(getStringSize)(JNIEnv *env, jclass, jlong font, jstring text, jlong length) {
     std::string t = ttf_jni_copy_string(env, text);
     int w = 0, h = 0;
-    if (!TTF_GetStringSize(ttf_jni_font(font), t.c_str(), ttf_jni_string_length(length, t), &w, &h)) {
+    const bool result = TTF_GetStringSize(ttf_jni_font(font), t.c_str(), ttf_jni_string_length(length, t), &w, &h);
+    fprintf(stderr, "TTFDIAG: TTF_GetStringSize(font=%p text='%s' len=%zu) result=%d w=%d h=%d err='%s'\n",
+            ttf_jni_font(font), t.c_str(), ttf_jni_string_length(length, t), result, w, h,
+            SDL_GetError() ? SDL_GetError() : "");
+    if (!result) {
         return nullptr;
     }
     return ttf_jni_new_jint_array(env, {w, h});
@@ -568,8 +572,12 @@ TTFJNI_FUNC(jintArray) TTFJNI_NAME(measureString)(JNIEnv *env, jclass, jlong fon
         std::string t = ttf_jni_copy_string(env, text);                                 \
         SDL_Color fg;                                                                   \
         ttf_jni_fill_color(fg, r, g, b, a);                                             \
-        return ttf_jni_ptr(CALL(ttf_jni_font(font), t.c_str(),                          \
-                                ttf_jni_string_length(length, t), fg));                      \
+        SDL_Surface *surf = CALL(ttf_jni_font(font), t.c_str(),                          \
+                                ttf_jni_string_length(length, t), fg);                      \
+        fprintf(stderr, "TTFDIAG: %s(font=%p text='%s' len=%zu) surf=%p err='%s'\n",       \
+                #NAME, ttf_jni_font(font), t.c_str(), ttf_jni_string_length(length, t),     \
+                (void *)surf, SDL_GetError() ? SDL_GetError() : "");                        \
+        return ttf_jni_ptr(surf);                                                           \
     }
 
 #define TTF_RENDER_TEXT_BG_FN(NAME, CALL)                                               \
@@ -580,8 +588,12 @@ TTFJNI_FUNC(jintArray) TTFJNI_NAME(measureString)(JNIEnv *env, jclass, jlong fon
         SDL_Color fg, bgc;                                                              \
         ttf_jni_fill_color(fg, r, g, b, a);                                             \
         ttf_jni_fill_color(bgc, br, bg, bb, ba);                                        \
-        return ttf_jni_ptr(CALL(ttf_jni_font(font), t.c_str(),                          \
-                                ttf_jni_string_length(length, t), fg, bgc));                 \
+        SDL_Surface *surf = CALL(ttf_jni_font(font), t.c_str(),                          \
+                                ttf_jni_string_length(length, t), fg, bgc);             \
+        fprintf(stderr, "TTFDIAG: %s(font=%p text='%s' len=%zu) surf=%p err='%s'\n",    \
+                #NAME, ttf_jni_font(font), t.c_str(), ttf_jni_string_length(length, t),  \
+                (void *)surf, SDL_GetError() ? SDL_GetError() : "");                     \
+        return ttf_jni_ptr(surf);                                                        \
     }
 
 #define TTF_RENDER_TEXT_WRAPPED_FN(NAME, CALL)                                          \

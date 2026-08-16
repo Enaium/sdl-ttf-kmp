@@ -9,15 +9,26 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Builds the JNI shared library (libsdl_ttf_jni) for the JVM target.
 #
 # SDL_ttf (with the vendored FreeType/HarfBuzz/plutosvg) is compiled statically
-# into the library, but SDL3 itself is NOT linked: SDL_ttf only needs the SDL3
-# headers to compile, and the SDL3 symbols stay undefined so they are resolved
-# at dlopen time from libsdl_jni, the JNI library shipped by the sdl-kmp
-# project (which statically links the real SDL3). This keeps a single SDL3
-# instance per process so global state (errors, hints, the event queue, ...)
-# is shared with the SDL3 bindings.
+# into the library; how SDL3 is provided differs per platform, see below.
 #
-# libsdl_jni must therefore be loaded before libsdl_ttf_jni; the Kotlin
-# Jni object enforces this (see Jni.kt).
+# libsdl_jni must be loaded before libsdl_ttf_jni on the platforms where the
+# SDL3 symbols are resolved at dlopen time; the Kotlin Jni object enforces
+# this (see Jni.kt).
+#
+# SDL3 handling differs per platform:
+#
+#  - macOS/Linux: SDL3 is NOT linked. SDL_ttf only needs the SDL3 headers to
+#    compile, and the SDL3 symbols stay undefined so they are resolved at
+#    dlopen time from libsdl_jni, the JNI library shipped by the sdl-kmp
+#    project (which statically links the real SDL3). This keeps a single
+#    SDL3 instance per process so global state (errors, hints, the event
+#    queue, ...) is shared with the SDL3 bindings. libsdl_jni must therefore
+#    be loaded before libsdl_ttf_jni; the Kotlin Jni object enforces this.
+#  - Windows: MinGW's linker refuses undefined symbols when creating a DLL,
+#    so SDL3 is compiled and linked into the library there (a second SDL3
+#    copy in the process). The TTF-side SDL_GetError is read through
+#    getError(), and cross-library SDL object calls go through SDL3's
+#    function-pointer interfaces, so the copies do not interfere.
 if(NOT DEFINED SDL_SOURCE_DIR)
     set(SDL_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../includes/SDL")
 endif()
@@ -25,14 +36,24 @@ if(NOT DEFINED SDLTTF_SOURCE_DIR)
     set(SDLTTF_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../includes/SDL_ttf")
 endif()
 
-# Fake SDL3 targets so SDL_ttf's CMake configures without building SDL3.
-# SDL3::Headers provides the include directory; SDL3::SDL3 is never actually
-# linked into sdl_ttf_jni (we use the archive file directly below), so an
-# INTERFACE target with no location is enough.
-add_library(SDL3::Headers INTERFACE IMPORTED)
-set_target_properties(SDL3::Headers PROPERTIES
-    INTERFACE_INCLUDE_DIRECTORIES "${SDL_SOURCE_DIR}/include")
-add_library(SDL3::SDL3 INTERFACE IMPORTED)
+if(WIN32)
+    set(SDL_SHARED OFF CACHE BOOL "" FORCE)
+    set(SDL_STATIC ON CACHE BOOL "" FORCE)
+    set(SDL_TEST OFF CACHE BOOL "" FORCE)
+    set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(SDL_TESTS OFF CACHE BOOL "" FORCE)
+    set(SDL_INSTALL OFF CACHE BOOL "" FORCE)
+    add_subdirectory(${SDL_SOURCE_DIR} SDL)
+else()
+    # Fake SDL3 targets so SDL_ttf's CMake configures without building SDL3.
+    # SDL3::Headers provides the include directory; SDL3::SDL3 is never
+    # actually linked into sdl_ttf_jni (we use the archive file directly
+    # below), so an INTERFACE target with no location is enough.
+    add_library(SDL3::Headers INTERFACE IMPORTED)
+    set_target_properties(SDL3::Headers PROPERTIES
+        INTERFACE_INCLUDE_DIRECTORIES "${SDL_SOURCE_DIR}/include")
+    add_library(SDL3::SDL3 INTERFACE IMPORTED)
+endif()
 
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(SDLTTF_VENDORED ON CACHE BOOL "" FORCE)
@@ -66,16 +87,21 @@ if(JNI_INCLUDE_DIR_PLATFORM)
     target_include_directories(sdl_ttf_jni PRIVATE ${JNI_INCLUDE_DIR_PLATFORM})
 endif()
 
-# Link the SDL3_ttf archive file directly (not the target) so SDL3 does not
-# get linked in: its symbols must stay undefined for runtime resolution from
-# libsdl_jni. SDL3_ttf-static already contains the vendored freetype,
-# harfbuzz and plutosvg objects (SDL_ttf's CMake embeds them via
-# TARGET_OBJECTS when building static).
-target_link_libraries(sdl_ttf_jni PRIVATE $<TARGET_FILE:SDL3_ttf-static>)
-
-# The archive is referenced by file path above (not as a target), so it has
-# no implicit build dependency; make sure it is built.
-add_dependencies(sdl_ttf_jni SDL3_ttf-static)
+if(WIN32)
+    # Link the SDL3_ttf target (not the archive file): its LINK_ONLY
+    # interface pulls in SDL3-static plus the Windows system libraries.
+    target_link_libraries(sdl_ttf_jni PRIVATE SDL3_ttf-static)
+else()
+    # Link the SDL3_ttf archive file directly (not the target) so SDL3 does
+    # not get linked in: its symbols must stay undefined for runtime
+    # resolution from libsdl_jni. SDL3_ttf-static already contains the
+    # vendored freetype, harfbuzz and plutosvg objects (SDL_ttf's CMake
+    # embeds them via TARGET_OBJECTS when building static).
+    target_link_libraries(sdl_ttf_jni PRIVATE $<TARGET_FILE:SDL3_ttf-static>)
+    # The archive is referenced by file path above (not as a target), so it
+    # has no implicit build dependency; make sure it is built.
+    add_dependencies(sdl_ttf_jni SDL3_ttf-static)
+endif()
 
 if(APPLE)
     # Resolve the SDL3 symbols at runtime from libsdl_jni (which is loaded

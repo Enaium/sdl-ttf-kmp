@@ -28,6 +28,10 @@ import cn.enaium.sdl.SDLGPU
 import cn.enaium.sdl.SDLGPUBuffer
 import cn.enaium.sdl.SDLGPUBufferCreateInfo
 import cn.enaium.sdl.SDLGPUBufferUsage
+import cn.enaium.sdl.SDLGPUBlendFactor
+import cn.enaium.sdl.SDLGPUBlendOp
+import cn.enaium.sdl.SDLGPUBlendState
+import cn.enaium.sdl.SDLGPUColorComponent
 import cn.enaium.sdl.SDLGPUColorTargetDescription
 import cn.enaium.sdl.SDLGPUColorTargetInfo
 import cn.enaium.sdl.SDLGPUDevice
@@ -37,53 +41,64 @@ import cn.enaium.sdl.SDLGPUGraphicsPipelineCreateInfo
 import cn.enaium.sdl.SDLGPUIndexElementSize
 import cn.enaium.sdl.SDLGPULoadOp
 import cn.enaium.sdl.SDLGPUPrimitiveType
-import cn.enaium.sdl.SDLGPURenderPass
 import cn.enaium.sdl.SDLGPURasterizerState
+import cn.enaium.sdl.SDLGPURenderPass
 import cn.enaium.sdl.SDLGPUSampler
 import cn.enaium.sdl.SDLGPUSamplerCreateInfo
-import cn.enaium.sdl.SDLGPUTexture
 import cn.enaium.sdl.SDLGPUShader
 import cn.enaium.sdl.SDLGPUShaderFormat
 import cn.enaium.sdl.SDLGPUShaderStage
 import cn.enaium.sdl.SDLGPUStoreOp
+import cn.enaium.sdl.SDLGPUTexture
+import cn.enaium.sdl.SDLGPUTextureCreateInfo
 import cn.enaium.sdl.SDLGPUTextureFormat
+import cn.enaium.sdl.SDLGPUTextureUsage
 import cn.enaium.sdl.SDLGPUVertexAttribute
 import cn.enaium.sdl.SDLGPUVertexBufferDescription
 import cn.enaium.sdl.SDLGPUVertexElementFormat
 import cn.enaium.sdl.SDLGPUVertexInputRate
 import cn.enaium.sdl.SDLGPUVertexInputState
 import cn.enaium.sdl.SDLGPUViewport
-import cn.enaium.sdl.SDLGPUWindowTexture
 import cn.enaium.sdl.SDLInitFlags
 import cn.enaium.sdl.SDLKeycode
+import cn.enaium.sdl.SDLPixelFormat
 import cn.enaium.sdl.SDLWindow
 import cn.enaium.sdl.SDLWindowEventType
 import cn.enaium.sdl.SDLWindowFlags
 import cn.enaium.sdl.SDLEvent
+import cn.enaium.sdl.SDLSurface
 import cn.enaium.sdl.ttf.SDLTTF
 import cn.enaium.sdl.ttf.SDLTTFFont
 import cn.enaium.sdl.ttf.SDLTTFImageType
+import cn.enaium.sdl.ttf.SDLTTFStyle
 import cn.enaium.sdl.ttf.SDLTTFText
 import cn.enaium.sdl.ttf.SDLTTFTextEngine
 
 /** Vertex stride: float2 position + float2 uv. */
 private const val VERTEX_STRIDE = 16
-private const val MAX_VERTICES = 8192
-private const val MAX_INDICES = 16384
+private const val MAX_VERTICES = 16384
+private const val MAX_INDICES = 32768
 
 /**
  * The SDL_ttf GPU demo: lays text out with the SDL_ttf GPU text engine and
  * renders it with the SDL3 GPU API (sdl-kmp's SDLGPU bindings), entirely
  * from commonMain.
  *
- * Per frame the text's draw sequences ([SDLTTFText.getGPUDrawData]) are
- * fetched: vertex positions in pixels (positive Y upwards), normalized UVs
- * into the glyph atlas and indices. The positions are transformed to NDC on
- * the CPU, the interleaved vertices and indices are uploaded into buffers,
- * the atlas texture is bound and each sequence is drawn with
- * `drawIndexedPrimitives`. ALPHA/COLOR sequences use the text pipeline,
- * SDF sequences (the signed distance in the atlas alpha) use the SDF
- * pipeline whose shader smoothsteps the distance.
+ * It covers the same use cases as the 2D renderer example:
+ *
+ *  - text laid out by the GPU engine ([SDLTTF.createGPUTextEngine] +
+ *    [SDLTTFText.getGPUDrawData]) and drawn with indexed primitives;
+ *  - rotated/scaled text (per-vertex NDC transform on the CPU);
+ *  - SDF text rendered through a dedicated SDF pipeline (smoothstep on the
+ *    signed distance stored in the atlas alpha);
+ *  - the surface renderers ([SDLTTF.renderTextBlended] and friends)
+ *    uploaded into GPU textures and drawn as quads;
+ *  - font styles (bold/italic), CJK text, colors, interactive resizing.
+ *
+ * Coordinate notes (SDL_GPU conventions): NDC has +Y upwards, the viewport
+ * origin is top-left with +Y down, and texture coordinates are top-left
+ * origin with +Y down. TTF_GetGPUTextDrawData vertices are pixels with the
+ * origin at the text's bottom-left and +Y upwards.
  */
 class GpuTextDemo(
     private val window: SDLWindow,
@@ -91,10 +106,13 @@ class GpuTextDemo(
     private val fontPath: String,
 ) {
     private val font: SDLTTFFont = SDLTTF.openFont(fontPath, 48f)
+    private val styleFont: SDLTTFFont = SDLTTF.openFont(fontPath, 28f)
     private val engine: SDLTTFTextEngine = SDLTTF.createGPUTextEngine(device)
 
-    private val text: SDLTTFText = SDLTTF.createText(engine, font, "SDL_ttf GPU text engine")
+    private val title: SDLTTFText = SDLTTF.createText(engine, font, "SDL_ttf GPU text engine")
     private val colored: SDLTTFText = SDLTTF.createText(engine, font, "GPU API - rendered from commonMain")
+    private val cjk: SDLTTFText = SDLTTF.createText(engine, font, "中文渲染")
+    private val styled: SDLTTFText = SDLTTF.createText(engine, styleFont, "Bold + Italic styles")
     private val sdfFont: SDLTTFFont = SDLTTF.openFont(fontPath, 64f).also { it.SDF = true }
     private val sdfText: SDLTTFText = SDLTTF.createText(engine, sdfFont, "SDF: sharp at any scale")
 
@@ -104,12 +122,27 @@ class GpuTextDemo(
     private val vertexBuffer: SDLGPUBuffer
     private val indexBuffer: SDLGPUBuffer
 
+    /** Surface-rendered samples uploaded into GPU textures (quad demo). */
+    private val surfaceTextures: List<Pair<SDLGPUTexture, Pair<Int, Int>>>
+
     private var angle = 0.0
+    private var colorIndex = 0
+    private var fontGrow = true
     private var running = true
+
+    private val palette = listOf(
+        SDLColor(255, 200, 60),
+        SDLColor(80, 255, 160),
+        SDLColor(120, 180, 255),
+        SDLColor(255, 120, 200),
+    )
 
     init {
         colored.color = SDLColor(180, 200, 255)
+        cjk.color = SDLColor(255, 200, 100)
+        styled.color = SDLColor(160, 220, 160)
         sdfText.color = SDLColor(255, 255, 255)
+        styleFont.style = SDLTTFStyle.BOLD or SDLTTFStyle.ITALIC
 
         val windowFormat = device.getWindowFormat(window)
         check(windowFormat != null) { "SDL_GetGPUSwapchainTextureFormat failed: ${SDL.error()}" }
@@ -156,6 +189,20 @@ class GpuTextDemo(
             ),
         )
 
+        // Glyph coverage lives in the atlas alpha channel: alpha blending is
+        // required (the default opaque blend would draw solid quads).
+        val blendState = SDLGPUBlendState(
+            srcColorBlendFactor = SDLGPUBlendFactor.SRC_ALPHA,
+            dstColorBlendFactor = SDLGPUBlendFactor.ONE_MINUS_SRC_ALPHA,
+            colorBlendOp = SDLGPUBlendOp.ADD,
+            srcAlphaBlendFactor = SDLGPUBlendFactor.SRC_ALPHA,
+            dstAlphaBlendFactor = SDLGPUBlendFactor.ONE_MINUS_SRC_ALPHA,
+            alphaBlendOp = SDLGPUBlendOp.ADD,
+            colorWriteMask = SDLGPUColorComponent.R or SDLGPUColorComponent.G or
+                SDLGPUColorComponent.B or SDLGPUColorComponent.A,
+        )
+        val colorTarget = SDLGPUColorTargetDescription(format = windowFormat, blendState = blendState)
+
         textPipeline = device.createGraphicsPipeline(
             SDLGPUGraphicsPipelineCreateInfo(
                 vertexShader = vertexShader,
@@ -163,7 +210,7 @@ class GpuTextDemo(
                 vertexInputState = vertexInputState,
                 primitiveType = SDLGPUPrimitiveType.TRIANGLELIST,
                 rasterizerState = SDLGPURasterizerState(),
-                targetDescriptions = listOf(SDLGPUColorTargetDescription(format = windowFormat)),
+                targetDescriptions = listOf(colorTarget),
             ),
         ) ?: error("text pipeline creation failed: ${SDL.error()}")
 
@@ -174,7 +221,7 @@ class GpuTextDemo(
                 vertexInputState = vertexInputState,
                 primitiveType = SDLGPUPrimitiveType.TRIANGLELIST,
                 rasterizerState = SDLGPURasterizerState(),
-                targetDescriptions = listOf(SDLGPUColorTargetDescription(format = windowFormat)),
+                targetDescriptions = listOf(colorTarget),
             ),
         ) ?: error("SDF pipeline creation failed: ${SDL.error()}")
 
@@ -196,7 +243,44 @@ class GpuTextDemo(
         textFragment.close()
         sdfFragment.close()
 
+        // Surface renderers -> GPU textures (the renderer example's
+        // "surface to texture" use case).
+        surfaceTextures = listOf(
+            Triple("Blended: alpha antialiasing", SDLColor(240, 240, 240), 0),
+            Triple("Shaded: solid background", SDLColor(120, 220, 160), 1),
+            Triple("LCD subpixel rendering", SDLColor(140, 210, 255), 2),
+        ).map { (label, color, mode) ->
+            val f = SDLTTF.openFont(fontPath, 24f)
+            val surface = when (mode) {
+                1 -> SDLTTF.renderTextShaded(f, label, color, SDLColor(20, 40, 30))
+                2 -> SDLTTF.renderTextLCD(f, label, color, SDLColor(10, 15, 25))
+                else -> SDLTTF.renderTextBlended(f, label, color)
+            }
+            f.close()
+            val w = surface?.width ?: 0
+            val h = surface?.height ?: 0
+            val tex = surfaceToTexture(surface, label)
+            tex to Pair(w, h)
+        }
+
         println("font: ${font.familyName}  GPU text engine ready")
+    }
+
+    private fun surfaceToTexture(surface: SDLSurface?, label: String): SDLGPUTexture {
+        checkNotNull(surface) { "surface render of '$label' failed: ${SDLTTF.error()}" }
+        val tex = device.createTexture(
+            SDLGPUTextureCreateInfo(
+                format = SDLGPUTextureFormat.B8G8R8A8_UNORM,
+                usage = SDLGPUTextureUsage.SAMPLE,
+                width = surface.width,
+                height = surface.height,
+            ),
+        ) ?: error("texture creation failed: ${SDL.error()}")
+        check(tex.upload(surface.pixels, surface.pitch, 0, 0, surface.width, surface.height)) {
+            "texture upload failed: ${SDL.error()}"
+        }
+        surface.close()
+        return tex
     }
 
     /** Runs one frame; returns `false` when the demo should stop. */
@@ -209,13 +293,32 @@ class GpuTextDemo(
                 is SDLEvent.Quit -> running = false
                 is SDLEvent.Window ->
                     if (event.type == SDLWindowEventType.CLOSE_REQUESTED) running = false
-                is SDLEvent.Key ->
-                    if (event.down && event.keycode == SDLKeycode.ESCAPE) running = false
+                is SDLEvent.Key -> when {
+                    !event.down -> Unit
+                    event.keycode == SDLKeycode.ESCAPE -> running = false
+                    event.keycode == SDLKeycode.SPACE -> {
+                        fontGrow = !fontGrow
+                        println("SDF scale animation ${if (fontGrow) "on" else "off"}")
+                    }
+                    event.keycode == SDLKeycode.C -> {
+                        colorIndex = (colorIndex + 1) % palette.size
+                        println("color -> ${palette[colorIndex]}")
+                    }
+                    event.keycode == SDLKeycode.UP -> {
+                        font.size = (font.size + 4f).coerceAtMost(96f)
+                        println("font size -> ${font.size.toInt()}pt")
+                    }
+                    event.keycode == SDLKeycode.DOWN -> {
+                        font.size = (font.size - 4f).coerceAtLeast(8f)
+                        println("font size -> ${font.size.toInt()}pt")
+                    }
+                }
                 else -> Unit
             }
         }
 
         angle = (angle + 0.6) % 360.0
+        colored.color = palette[colorIndex]
 
         val cmd = device.beginCommandBuffer() ?: return running
         val windowTexture = device.acquireSwapchainTexture(cmd, window)
@@ -237,10 +340,23 @@ class GpuTextDemo(
                 pass.setViewport(SDLGPUViewport(0f, 0f, vw, vh))
                 pass.setScissor(0, 0, vw.toInt(), vh.toInt())
 
-                // Title: a rotating scaled piece of the text.
-                drawText(pass, vw, vh, text, 40f, 40f, angle, (1f + 0.5f * kotlin.math.sin(angle / 40.0)).toFloat())
-                drawText(pass, vw, vh, colored, 40f, 120f, 0.0, 1f)
-                drawText(pass, vw, vh, sdfText, 40f, 220f, 0.0, 1f)
+                // Title: rotating + scaling text.
+                val titleScale = 1f + 0.5f * kotlin.math.sin(angle / 40.0).toFloat()
+                drawText(pass, vw, vh, title, 40f, 40f, angle, titleScale)
+                drawText(pass, vw, vh, colored, 40f, 130f, 0.0, 1f)
+                drawText(pass, vw, vh, cjk, 40f, 220f, 0.0, 1f)
+                drawText(pass, vw, vh, styled, 40f, 300f, 0.0, 1f)
+
+                // SDF text: scaling animates when SPACE enables it.
+                val sdfScale = if (fontGrow) 1f + 0.25f * kotlin.math.sin(angle / 30.0).toFloat() else 1f
+                drawText(pass, vw, vh, sdfText, 40f, 360f, 0.0, sdfScale)
+
+                // Surface-rendered samples drawn as quads.
+                var y = 470f
+                for ((texture, size) in surfaceTextures) {
+                    drawSurfaceQuad(pass, vw, vh, texture, 40f, y, size.first.toFloat(), size.second.toFloat())
+                    y += size.second + 10f
+                }
 
                 pass.end()
                 pass.close()
@@ -268,18 +384,18 @@ class GpuTextDemo(
         scale: Float,
     ) {
         val sequences = text.getGPUDrawData() ?: return
-
-        val interleaved = FloatArray(MAX_VERTICES * 4)
-        val indices = IntArray(MAX_INDICES)
         val rad = angle * kotlin.math.PI / 180.0
         val cos = kotlin.math.cos(rad).toFloat()
         val sin = kotlin.math.sin(rad).toFloat()
-        val rotScale = scale
+        // TTF GPU vertices are pixels with the origin at the text's bottom-left
+        // and positive Y upwards; (px, py) is the top-left screen position
+        // (py grows downwards), so screenY = py + textHeight - y.
+        val textHeight = text.size?.y?.toFloat() ?: 0f
+        val interleaved = FloatArray(MAX_VERTICES * 4)
+        val indices = IntArray(MAX_INDICES)
         var vertexCount = 0
         var indexCount = 0
 
-        // First pass: transform + interleave all vertices; record per-sequence
-        // draw parameters.
         val draws = ArrayList<SequenceDraw>()
         var firstIndex = 0
         for (sequence in sequences) {
@@ -295,10 +411,12 @@ class GpuTextDemo(
                 // rotate + scale around the text origin
                 val rx = (x * cos - y * sin) * scale
                 val ry = (x * sin + y * cos) * scale
-                // pixel -> NDC (positive Y upwards)
+                // pixel -> NDC (SDL_GPU NDC: +1 at the top of the viewport;
+                // screen y grows downwards, TTF y grows upwards)
                 val out = vertexCount * 4
+                val screenY = py + textHeight - ry
                 interleaved[out] = (px + rx) / vw * 2f - 1f
-                interleaved[out + 1] = (py + ry) / vh * 2f - 1f
+                interleaved[out + 1] = 1f - screenY / vh * 2f
                 interleaved[out + 2] = uvs[i * 2]
                 interleaved[out + 3] = uvs[i * 2 + 1]
                 vertexCount++
@@ -346,11 +464,46 @@ class GpuTextDemo(
         }
     }
 
+    /** Draws a texture-backed surface as a full quad at screen position (px, py). */
+    private fun drawSurfaceQuad(
+        pass: SDLGPURenderPass,
+        vw: Float,
+        vh: Float,
+        texture: SDLGPUTexture,
+        px: Float,
+        py: Float,
+        width: Float,
+        height: Float,
+    ) {
+        val x0 = px / vw * 2f - 1f
+        val y0 = 1f - py / vh * 2f
+        val x1 = (px + width) / vw * 2f - 1f
+        val y1 = 1f - (py + height) / vh * 2f
+        val quad = floatArrayOf(
+            // position (x, y)   uv (u, v)
+            x0, y0, 0f, 0f,
+            x1, y0, 1f, 0f,
+            x0, y1, 0f, 1f,
+            x0, y1, 0f, 1f,
+            x1, y0, 1f, 0f,
+            x1, y1, 1f, 1f,
+        )
+        vertexBuffer.setData(quad.toByteArray(0, quad.size * 4))
+        pass.bindGraphicsPipeline(textPipeline)
+        pass.bindGraphicsTextureSamplers(0, texture to sampler)
+        pass.bindVertexBuffers(vertexBuffer to 0)
+        pass.drawPrimitives(vertexCount = 6)
+    }
+
     fun close() {
-        text.close()
+        surfaceTextures.forEach { it.first.close() }
+        title.close()
         colored.close()
+        cjk.close()
+        styled.close()
         sdfText.close()
         engine.close()
+        styleFont.close()
         sdfFont.close()
         font.close()
         indexBuffer.close()

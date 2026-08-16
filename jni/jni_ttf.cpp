@@ -58,12 +58,55 @@ static inline jstring ttf_jni_to_string(JNIEnv *env, const char *s) {
     return s ? env->NewStringUTF(s) : nullptr;
 }
 
+// Converts a Kotlin String to UTF-8. GetStringUTFChars() returns Modified
+// UTF-8 (surrogate pairs are encoded in CESU-8), which is NOT what SDL_ttf
+// expects, so the UTF-16 code units are converted properly (supplementary
+// plane characters such as emoji become 4-byte UTF-8 sequences). The length
+// conventions of SDL_ttf are in UTF-8 bytes; use ttf_jni_string_length() for
+// the byte length of a converted string.
 static inline std::string ttf_jni_copy_string(JNIEnv *env, jstring s) {
     if (!s) return std::string();
-    const char *chars = env->GetStringUTFChars(s, nullptr);
-    std::string out(chars ? chars : "");
-    env->ReleaseStringUTFChars(s, chars);
+    const jsize len = env->GetStringLength(s);
+    if (len == 0) return std::string();
+    const jchar *chars = env->GetStringChars(s, nullptr);
+    if (!chars) return std::string();
+    std::string out;
+    out.reserve(static_cast<size_t>(len));
+    for (jsize i = 0; i < len; ++i) {
+        uint32_t cp = chars[i];
+        if (cp >= 0xD800 && cp <= 0xDBFF && i + 1 < len) {
+            const uint32_t lo = chars[i + 1];
+            if (lo >= 0xDC00 && lo <= 0xDFFF) {
+                cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
+                ++i;
+            }
+        }
+        if (cp < 0x80) {
+            out.push_back(static_cast<char>(cp));
+        } else if (cp < 0x800) {
+            out.push_back(static_cast<char>(0xC0 | (cp >> 6)));
+            out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+        } else if (cp < 0x10000) {
+            out.push_back(static_cast<char>(0xE0 | (cp >> 12)));
+            out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+            out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+        } else {
+            out.push_back(static_cast<char>(0xF0 | (cp >> 18)));
+            out.push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3F)));
+            out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+            out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+        }
+    }
+    env->ReleaseStringChars(s, chars);
     return out;
+}
+
+// SDL_ttf takes a byte length where 0 means "null terminated". The Kotlin
+// side always passes the whole string, so compute the real UTF-8 byte length
+// instead of relying on the null-terminated convention (which is unreliable
+// in some SDL_ttf builds).
+static inline size_t ttf_jni_string_length(jlong length, const std::string &t) {
+    return length > 0 ? static_cast<size_t>(length) : t.size();
 }
 
 static inline jintArray ttf_jni_new_jint_array(JNIEnv *env, const std::vector<jint> &values) {
@@ -166,9 +209,117 @@ TTFJNI_FUNC(jboolean) TTFJNI_NAME(setError)(JNIEnv *env, jclass, jstring message
 // Fonts
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// In-memory font stream
+//
+// openFont reads the font file into memory and opens it from an SDL_IOStream
+// backed by a custom interface whose close callback frees the buffer. The
+// file-stream path (SDL_IOFromFile + freetype's seek/read pattern) is
+// unreliable in a second SDL3 copy on Windows; a memory stream is pure
+// pointer arithmetic and works identically on every platform.
+//
+// SDL_IOFromMem/SDL_IOFromConstMem do NOT copy the caller's buffer, so they
+// cannot own it; this interface does.
+// ---------------------------------------------------------------------------
+
+struct TTFJniFontBuffer {
+    Uint8 *data;
+    Sint64 size;
+    Sint64 pos;
+};
+
+static Sint64 SDLCALL ttf_jni_fontbuf_size(void *userdata) {
+    return ((TTFJniFontBuffer *)userdata)->size;
+}
+
+static Sint64 SDLCALL ttf_jni_fontbuf_seek(void *userdata, Sint64 offset, SDL_IOWhence whence) {
+    TTFJniFontBuffer *b = (TTFJniFontBuffer *)userdata;
+    const Sint64 base = whence == SDL_IO_SEEK_SET ? 0 :
+                        whence == SDL_IO_SEEK_CUR ? b->pos :
+                        whence == SDL_IO_SEEK_END ? b->size : -1;
+    if (base < 0) {
+        return SDL_SetError("Unknown seek whence");
+    }
+    const Sint64 target = base + offset;
+    if (target < 0 || target > b->size) {
+        return SDL_SetError("Seek past end of stream");
+    }
+    b->pos = target;
+    return target;
+}
+
+static size_t SDLCALL ttf_jni_fontbuf_read(void *userdata, void *ptr, size_t size, SDL_IOStatus *status) {
+    TTFJniFontBuffer *b = (TTFJniFontBuffer *)userdata;
+    if (b->pos >= b->size) {
+        if (status) {
+            *status = SDL_IO_STATUS_EOF;
+        }
+        return 0;
+    }
+    const size_t avail = static_cast<size_t>(b->size - b->pos);
+    const size_t n = size < avail ? size : avail;
+    SDL_memcpy(ptr, b->data + b->pos, n);
+    b->pos += static_cast<Sint64>(n);
+    return n;
+}
+
+static bool SDLCALL ttf_jni_fontbuf_close(void *userdata) {
+    TTFJniFontBuffer *b = (TTFJniFontBuffer *)userdata;
+    SDL_free(b->data);
+    SDL_free(b);
+    return true;
+}
+
 TTFJNI_FUNC(jlong) TTFJNI_NAME(openFont)(JNIEnv *env, jclass, jstring path, jfloat ptsize) {
     std::string p = ttf_jni_copy_string(env, path);
-    return ttf_jni_ptr(TTF_OpenFont(p.c_str(), ptsize));
+
+    SDL_IOStream *stream = SDL_IOFromFile(p.c_str(), "rb");
+    if (!stream) {
+        return 0;
+    }
+    const Sint64 size = SDL_GetIOSize(stream);
+    void *data = nullptr;
+    if (size > 0) {
+        data = SDL_malloc(static_cast<size_t>(size));
+        if (data) {
+            const size_t got = SDL_ReadIO(stream, data, static_cast<size_t>(size));
+            if (got != static_cast<size_t>(size)) {
+                SDL_free(data);
+                data = nullptr;
+            }
+        }
+    }
+    SDL_CloseIO(stream);
+    if (!data) {
+        SDL_SetError("Failed to read font file into memory");
+        return 0;
+    }
+
+    TTFJniFontBuffer *buf = (TTFJniFontBuffer *)SDL_malloc(sizeof(*buf));
+    if (!buf) {
+        SDL_free(data);
+        return 0;
+    }
+    buf->data = (Uint8 *)data;
+    buf->size = size;
+    buf->pos = 0;
+
+    SDL_IOStreamInterface iface;
+    SDL_INIT_INTERFACE(&iface);
+    iface.size = ttf_jni_fontbuf_size;
+    iface.seek = ttf_jni_fontbuf_seek;
+    iface.read = ttf_jni_fontbuf_read;
+    iface.close = ttf_jni_fontbuf_close;
+
+    SDL_IOStream *mem = SDL_OpenIO(&iface, buf);
+    if (!mem) {
+        ttf_jni_fontbuf_close(buf);
+        return 0;
+    }
+    // closeio=true: the font closes the stream (and thus frees the buffer)
+    // when it is closed; TTF_CopyFont shares the stream through a refcount,
+    // so the buffer outlives all fonts referencing it.
+    return ttf_jni_ptr(TTF_OpenFontIO(mem, true, ptsize));
 }
 
 TTFJNI_FUNC(jlong) TTFJNI_NAME(openFontIO)(JNIEnv *, jclass, jlong stream, jboolean closeio, jfloat ptsize) {
@@ -349,7 +500,7 @@ TTFJNI_FUNC(jintArray) TTFJNI_NAME(getGlyphKerning)(JNIEnv *env, jclass, jlong f
 TTFJNI_FUNC(jintArray) TTFJNI_NAME(getStringSize)(JNIEnv *env, jclass, jlong font, jstring text, jlong length) {
     std::string t = ttf_jni_copy_string(env, text);
     int w = 0, h = 0;
-    if (!TTF_GetStringSize(ttf_jni_font(font), t.c_str(), static_cast<size_t>(length), &w, &h)) {
+    if (!TTF_GetStringSize(ttf_jni_font(font), t.c_str(), ttf_jni_string_length(length, t), &w, &h)) {
         return nullptr;
     }
     return ttf_jni_new_jint_array(env, {w, h});
@@ -358,7 +509,7 @@ TTFJNI_FUNC(jintArray) TTFJNI_NAME(getStringSize)(JNIEnv *env, jclass, jlong fon
 TTFJNI_FUNC(jintArray) TTFJNI_NAME(getStringSizeWrapped)(JNIEnv *env, jclass, jlong font, jstring text, jlong length, jint wrapWidth) {
     std::string t = ttf_jni_copy_string(env, text);
     int w = 0, h = 0;
-    if (!TTF_GetStringSizeWrapped(ttf_jni_font(font), t.c_str(), static_cast<size_t>(length), wrapWidth, &w, &h)) {
+    if (!TTF_GetStringSizeWrapped(ttf_jni_font(font), t.c_str(), ttf_jni_string_length(length, t), wrapWidth, &w, &h)) {
         return nullptr;
     }
     return ttf_jni_new_jint_array(env, {w, h});
@@ -368,7 +519,7 @@ TTFJNI_FUNC(jintArray) TTFJNI_NAME(measureString)(JNIEnv *env, jclass, jlong fon
     std::string t = ttf_jni_copy_string(env, text);
     int measuredWidth = 0;
     size_t measuredLength = 0;
-    if (!TTF_MeasureString(ttf_jni_font(font), t.c_str(), static_cast<size_t>(length),
+    if (!TTF_MeasureString(ttf_jni_font(font), t.c_str(), ttf_jni_string_length(length, t),
                            maxWidth, &measuredWidth, &measuredLength)) {
         return nullptr;
     }
@@ -390,7 +541,7 @@ TTFJNI_FUNC(jintArray) TTFJNI_NAME(measureString)(JNIEnv *env, jclass, jlong fon
         SDL_Color fg;                                                                   \
         ttf_jni_fill_color(fg, r, g, b, a);                                             \
         return ttf_jni_ptr(CALL(ttf_jni_font(font), t.c_str(),                          \
-                                static_cast<size_t>(length), fg));                      \
+                                ttf_jni_string_length(length, t), fg));                      \
     }
 
 #define TTF_RENDER_TEXT_BG_FN(NAME, CALL)                                               \
@@ -402,7 +553,7 @@ TTFJNI_FUNC(jintArray) TTFJNI_NAME(measureString)(JNIEnv *env, jclass, jlong fon
         ttf_jni_fill_color(fg, r, g, b, a);                                             \
         ttf_jni_fill_color(bgc, br, bg, bb, ba);                                        \
         return ttf_jni_ptr(CALL(ttf_jni_font(font), t.c_str(),                          \
-                                static_cast<size_t>(length), fg, bgc));                 \
+                                ttf_jni_string_length(length, t), fg, bgc));                 \
     }
 
 #define TTF_RENDER_TEXT_WRAPPED_FN(NAME, CALL)                                          \
@@ -413,7 +564,7 @@ TTFJNI_FUNC(jintArray) TTFJNI_NAME(measureString)(JNIEnv *env, jclass, jlong fon
         SDL_Color fg;                                                                   \
         ttf_jni_fill_color(fg, r, g, b, a);                                             \
         return ttf_jni_ptr(CALL(ttf_jni_font(font), t.c_str(),                          \
-                                static_cast<size_t>(length), fg, wrapWidth));           \
+                                ttf_jni_string_length(length, t), fg, wrapWidth));           \
     }
 
 #define TTF_RENDER_TEXT_BG_WRAPPED_FN(NAME, CALL)                                       \
@@ -426,7 +577,7 @@ TTFJNI_FUNC(jintArray) TTFJNI_NAME(measureString)(JNIEnv *env, jclass, jlong fon
         ttf_jni_fill_color(fg, r, g, b, a);                                             \
         ttf_jni_fill_color(bgc, br, bg, bb, ba);                                        \
         return ttf_jni_ptr(CALL(ttf_jni_font(font), t.c_str(),                          \
-                                static_cast<size_t>(length), fg, bgc, wrapWidth));      \
+                                ttf_jni_string_length(length, t), fg, bgc, wrapWidth));      \
     }
 
 TTF_RENDER_TEXT_FN(renderTextSolid, TTF_RenderText_Solid)
@@ -622,7 +773,7 @@ TTFJNI_FUNC(void) TTFJNI_NAME(destroySurfaceTextEngine)(JNIEnv *, jclass, jlong 
 TTFJNI_FUNC(jlong) TTFJNI_NAME(createText)(JNIEnv *env, jclass, jlong engine, jlong font, jstring text, jlong length) {
     std::string t = ttf_jni_copy_string(env, text);
     return ttf_jni_ptr(TTF_CreateText(ttf_jni_engine(engine), ttf_jni_font(font),
-                                      t.c_str(), static_cast<size_t>(length)));
+                                      t.c_str(), ttf_jni_string_length(length, t)));
 }
 
 TTFJNI_FUNC(void) TTFJNI_NAME(destroyText)(JNIEnv *, jclass, jlong text) {
@@ -690,17 +841,17 @@ TTFJNI_FUNC(jboolean) TTFJNI_NAME(textWrapWhitespaceVisible)(JNIEnv *, jclass, j
 
 TTFJNI_FUNC(jboolean) TTFJNI_NAME(setTextString)(JNIEnv *env, jclass, jlong text, jstring string, jlong length) {
     std::string t = ttf_jni_copy_string(env, string);
-    return TTF_SetTextString(ttf_jni_text(text), t.c_str(), static_cast<size_t>(length)) ? JNI_TRUE : JNI_FALSE;
+    return TTF_SetTextString(ttf_jni_text(text), t.c_str(), ttf_jni_string_length(length, t)) ? JNI_TRUE : JNI_FALSE;
 }
 
 TTFJNI_FUNC(jboolean) TTFJNI_NAME(appendTextString)(JNIEnv *env, jclass, jlong text, jstring string, jlong length) {
     std::string t = ttf_jni_copy_string(env, string);
-    return TTF_AppendTextString(ttf_jni_text(text), t.c_str(), static_cast<size_t>(length)) ? JNI_TRUE : JNI_FALSE;
+    return TTF_AppendTextString(ttf_jni_text(text), t.c_str(), ttf_jni_string_length(length, t)) ? JNI_TRUE : JNI_FALSE;
 }
 
 TTFJNI_FUNC(jboolean) TTFJNI_NAME(insertTextString)(JNIEnv *env, jclass, jlong text, jint offset, jstring string, jlong length) {
     std::string t = ttf_jni_copy_string(env, string);
-    return TTF_InsertTextString(ttf_jni_text(text), offset, t.c_str(), static_cast<size_t>(length)) ? JNI_TRUE : JNI_FALSE;
+    return TTF_InsertTextString(ttf_jni_text(text), offset, t.c_str(), ttf_jni_string_length(length, t)) ? JNI_TRUE : JNI_FALSE;
 }
 
 TTFJNI_FUNC(jboolean) TTFJNI_NAME(deleteTextString)(JNIEnv *, jclass, jlong text, jint offset, jint length) {

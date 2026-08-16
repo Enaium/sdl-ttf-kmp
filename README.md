@@ -120,6 +120,15 @@ SDL_VIDEO_DRIVER=dummy ./gradlew :examples:ttf_renderer:runDebugExecutableMacosA
 
 Controls: `ESC` quit, `UP`/`DOWN` font size, `SPACE` toggle wrapping, `W` wrap whitespace, `C` cycle color, click to inspect substrings.
 
+- **`examples/ttf_gpu`** — text laid out with the SDL_ttf GPU text engine
+  (`SDLTTF.createGPUTextEngine` + `SDLTTFText.getGPUDrawData`) and rendered
+  with the SDL3 GPU API from commonMain: MSL shaders on Metal, precompiled
+  SPIR-V elsewhere; per frame the pixel-space vertices are transformed to
+  NDC on the CPU, uploaded into vertex/index buffers and drawn with
+  `drawIndexedPrimitives`. A dedicated SDF pipeline (smoothstep on the
+  signed distance) renders SDF fonts sharp at any scale. Requires a GPU
+  (not available with the dummy driver).
+
 ## Building from source
 
 Requirements: JDK 21, CMake, a C/C++ compiler; Xcode for Apple targets, the `x86_64-w64-mingw32-gcc` toolchain for MinGW cross-compiles (Linux host), the Android NDK for `androidNative*`.

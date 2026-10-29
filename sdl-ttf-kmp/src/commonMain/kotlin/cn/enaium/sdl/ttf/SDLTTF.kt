@@ -191,9 +191,6 @@ interface SDLTTFFont : AutoCloseable {
     /** The text shaping direction, see [SDLTTFDirection]. */
     var direction: Int
 
-    /** Additional spacing in pixels between characters. */
-    var charSpacing: Int
-
     /** The total font height in pixels. */
     val height: Int
 

@@ -41,7 +41,6 @@ import sdl_ttf.TTF_FontIsFixedWidth
 import sdl_ttf.TTF_FontIsScalable
 import sdl_ttf.TTF_GPUAtlasDrawSequence
 import sdl_ttf.TTF_GetFontAscent
-import sdl_ttf.TTF_GetFontCharSpacing
 import sdl_ttf.TTF_GetFontDPI
 import sdl_ttf.TTF_GetFontDescent
 import sdl_ttf.TTF_GetFontDirection
@@ -92,7 +91,6 @@ import sdl_ttf.TTF_RenderText_Shaded
 import sdl_ttf.TTF_RenderText_Shaded_Wrapped
 import sdl_ttf.TTF_RenderText_Solid
 import sdl_ttf.TTF_RenderText_Solid_Wrapped
-import sdl_ttf.TTF_SetFontCharSpacing
 import sdl_ttf.TTF_SetFontDirection
 import sdl_ttf.TTF_SetFontHinting
 import sdl_ttf.TTF_SetFontKerning
@@ -361,12 +359,6 @@ internal class NativeSDLTTFFont internal constructor(
         get() = TTF_GetFontDirection(check()).toInt()
         set(value) {
             TTF_SetFontDirection(check(), value.toUInt())
-        }
-
-    override var charSpacing: Int
-        get() = TTF_GetFontCharSpacing(check())
-        set(value) {
-            TTF_SetFontCharSpacing(check(), value)
         }
 
     override val height: Int get() = TTF_GetFontHeight(check())

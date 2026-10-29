@@ -483,14 +483,6 @@ TTFJNI_FUNC(jint) TTFJNI_NAME(getFontDirection)(JNIEnv *, jclass, jlong font) {
     return static_cast<jint>(TTF_GetFontDirection(ttf_jni_font(font)));
 }
 
-TTFJNI_FUNC(jboolean) TTFJNI_NAME(setFontCharSpacing)(JNIEnv *, jclass, jlong font, jint spacing) {
-    return TTF_SetFontCharSpacing(ttf_jni_font(font), spacing) ? JNI_TRUE : JNI_FALSE;
-}
-
-TTFJNI_FUNC(jint) TTFJNI_NAME(getFontCharSpacing)(JNIEnv *, jclass, jlong font) {
-    return TTF_GetFontCharSpacing(ttf_jni_font(font));
-}
-
 TTFJNI_FUNC(jint) TTFJNI_NAME(getFontWeight)(JNIEnv *, jclass, jlong font) {
     return TTF_GetFontWeight(ttf_jni_font(font));
 }

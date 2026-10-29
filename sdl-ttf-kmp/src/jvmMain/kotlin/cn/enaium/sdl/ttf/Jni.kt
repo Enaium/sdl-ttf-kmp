@@ -93,8 +93,6 @@ internal object Jni {
     external fun getFontStyleName(font: Long): String?
     external fun setFontDirection(font: Long, direction: Int): Boolean
     external fun getFontDirection(font: Long): Int
-    external fun setFontCharSpacing(font: Long, spacing: Int): Boolean
-    external fun getFontCharSpacing(font: Long): Int
     external fun getFontWeight(font: Long): Int
     external fun addFallbackFont(font: Long, fallback: Long): Boolean
     external fun removeFallbackFont(font: Long, fallback: Long)

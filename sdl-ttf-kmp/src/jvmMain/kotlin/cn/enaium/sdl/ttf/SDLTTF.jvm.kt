@@ -213,12 +213,6 @@ internal class JvmSDLTTFFont internal constructor(ptr: Long) : SDLTTFFont {
             Jni.setFontDirection(check(), value)
         }
 
-    override var charSpacing: Int
-        get() = Jni.getFontCharSpacing(check())
-        set(value) {
-            Jni.setFontCharSpacing(check(), value)
-        }
-
     override val height: Int get() = Jni.getFontHeight(check())
     override val ascent: Int get() = Jni.getFontAscent(check())
     override val descent: Int get() = Jni.getFontDescent(check())

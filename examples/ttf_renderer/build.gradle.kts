@@ -29,6 +29,12 @@ kotlin {
         binaries.executable()
     }
 
+    // The shared demo is consumed by the browser runner
+    // (:examples:ttf_renderer:browser); it has no wasm entry point of its own.
+    wasmJs {
+        browser()
+    }
+
     sourceSets {
         // Kotlin 2.4's default hierarchy template does not create nativeMain
         // automatically; declare it and attach the native targets.

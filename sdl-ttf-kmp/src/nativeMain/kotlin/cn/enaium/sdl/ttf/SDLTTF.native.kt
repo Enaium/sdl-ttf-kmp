@@ -118,7 +118,9 @@ import sdl_ttf.TTF_WasInit
 
 
 
-private fun SDLColor.toCValue(): CValue<SDL_Color> = cValue {
+// SDL_ttf's cinterop package (sdl_ttf) declares its own SDL_Color, distinct
+// from sdl-kmp's sdl3.SDL_Color; convert at the call boundary.
+private fun SDLColor.toCValue(): CValue<sdl_ttf.SDL_Color> = cValue<sdl_ttf.SDL_Color> {
     r = this@toCValue.r.toUByte()
     g = this@toCValue.g.toUByte()
     b = this@toCValue.b.toUByte()
@@ -558,7 +560,7 @@ internal class NativeSDLTTFText internal constructor(
 
     override fun drawOnSurface(x: Int, y: Int, surface: SDLSurface): Boolean {
         if (surface.ptr == 0L) throw IllegalStateException("SDL surface is closed")
-        return TTF_DrawSurfaceText(check(), x, y, surface.ptr.toCPointer<SDL_Surface>())
+        return TTF_DrawSurfaceText(check(), x, y, surface.ptr.toCPointer<sdl_ttf.SDL_Surface>())
     }
 
     override fun setText(text: String): Boolean = TTF_SetTextString(check(), text, 0u)
@@ -727,18 +729,18 @@ actual object SDLTTF {
         return NativeSDLTTFText(t, engine as? NativeSDLTTFTextEngine, font as? NativeSDLTTFFont)
     }
 
-    private fun surfaceOf(ptr: CPointer<SDL_Surface>?): SDLSurface? =
+    private fun surfaceOf(ptr: CPointer<sdl_ttf.SDL_Surface>?): SDLSurface? =
         (ptr?.rawValue?.toLong() ?: 0L).toSDLSurface(owned = true)
 
     // SDL_ttf renders into INDEX8 (Solid/Shaded) and ARGB8888 (Blended/LCD)
     // surfaces; normalize them to the endianness-independent RGBA32 so the
     // pixel bytes can be uploaded straight into an R8G8B8A8 texture.
-    private fun rgba32Surface(ptr: CPointer<SDL_Surface>?): CPointer<SDL_Surface>? {
+    private fun rgba32Surface(ptr: CPointer<sdl_ttf.SDL_Surface>?): CPointer<sdl_ttf.SDL_Surface>? {
         if (ptr == null || ptr.pointed.format == SDL_PIXELFORMAT_RGBA32) {
             return ptr
         }
-        val converted = SDL_ConvertSurface(ptr, SDL_PIXELFORMAT_RGBA32)
-        SDL_DestroySurface(ptr)
+        val converted = sdl_ttf.SDL_ConvertSurface(ptr, SDL_PIXELFORMAT_RGBA32)
+        sdl_ttf.SDL_DestroySurface(ptr)
         return converted
     }
 

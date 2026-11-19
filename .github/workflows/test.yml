@@ -18,6 +18,10 @@ name: Test
 #                  JVM + linuxX64 tests; example (native, headless)
 #   Android x64 -> the four androidNative klibs (with the embedded static
 #                  library built via the Android NDK)
+#   Web x64     -> the wasmJs klib, the @enaium/sdl-ttf-kmp npm package
+#                  (SDL3 + SDL_ttf compiled to one Emscripten module) and the
+#                  browser example, run headless (Node) through the full
+#                  Kotlin/Wasm -> JS glue -> SDL_ttf pipeline
 #   Windows x64 -> the windows-x86_64 JNI artifact (native MinGW build) and
 #                  JVM tests
 #
@@ -186,6 +190,57 @@ jobs:
           :sdl-ttf-kmp:compileKotlinAndroidNativeArm32
           :sdl-ttf-kmp:compileKotlinAndroidNativeX64
           :sdl-ttf-kmp:compileKotlinAndroidNativeX86
+
+  test-web:
+    name: Test Web (wasmJs)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Configure JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Install Emscripten SDK
+        run: |
+          git clone --depth 1 https://github.com/emscripten-core/emsdk.git "$HOME/emsdk"
+          "$HOME/emsdk/emsdk" install latest
+          "$HOME/emsdk/emsdk" activate latest
+          "$HOME/emsdk/emsdk" construct_env
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          # The SDL/SDL_ttf submodules ship their own wrapper jars, which are
+          # not part of the action's known-good checksum list.
+          validate-wrappers: false
+
+      - name: Build the wasmJs klib
+        run: >
+          ./gradlew --no-daemon --stacktrace
+          -Pwasm.emsdk="$HOME/emsdk"
+          :sdl-ttf-kmp:compileKotlinWasmJs
+
+      - name: Stage the @enaium/sdl-ttf-kmp npm package
+        run: >
+          ./gradlew --no-daemon --stacktrace
+          -Pwasm.emsdk="$HOME/emsdk"
+          :sdl-ttf-kmp:assembleWasmNpm
+
+      - name: Assemble the browser example
+        run: >
+          ./gradlew --no-daemon --stacktrace
+          -Pwasm.emsdk="$HOME/emsdk"
+          :examples:ttf_renderer:browser:copyWebAssets
+
+      - name: Run the browser example headless (Node)
+        run: >
+          node examples/ttf_renderer/browser/build/browserApp/browser-node-test.mjs
 
   test-windows:
     name: Test Windows x64

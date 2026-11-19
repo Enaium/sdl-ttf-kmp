@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>sdl-ttf-kmp ttf_renderer (wasm)</title>
+    <style>
+        body {
+            margin: 0;
+            background: #121218;
+            color: #ddd;
+            font-family: system-ui, sans-serif;
+            overflow: hidden;
+        }
+        #canvas {
+            width: 100vw;
+            height: 100vh;
+            display: block;
+        }
+    </style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<script type="importmap">
+    {
+        "imports": {
+            "@enaium/sdl-ttf-kmp": "./node_modules/@enaium/sdl-ttf-kmp/ttf_kmp_glue.js"
+        }
+    }
+</script>
+<script type="module">
+    import { initSdlKmp, initSdlTtfKmp } from '@enaium/sdl-ttf-kmp';
+
+    // 1. Compile and instantiate the combined SDL3 + SDL_ttf Emscripten
+    //    module; initSdlTtfKmp installs both the sdl_kmp_* globals used by
+    //    sdl-kmp's wasmJs bindings and the sdl_ttf_kmp_* globals used by
+    //    sdl-ttf-kmp. SDL3's Emscripten driver finds the canvas through the
+    //    #canvas selector.
+    const canvas = document.getElementById('canvas');
+    canvas.width = 800;
+    canvas.height = 600;
+    // initSdlKmp is an alias of initSdlTtfKmp in this package: both
+    // initialize the same combined module, so the two-init pattern used by
+    // sdl-image-kmp is safe here as well (the second call is a no-op).
+    await initSdlKmp({ canvas });
+    await initSdlTtfKmp();
+
+    // 2. Make the demo font available to TTF_OpenFont inside the module's
+    //    virtual filesystem.
+    const font = new Uint8Array(await (await fetch('./fonts/DejaVuSans.ttf')).arrayBuffer());
+    sdlTtfKmpWriteFile('/fonts/DejaVuSans.ttf', font);
+
+    // 3. Import the Kotlin/Wasm module; its runtime auto-invokes main().
+    await import('./sdl-ttf-kmp-examples-ttf_renderer-browser.mjs');
+</script>
+</body>
+</html>

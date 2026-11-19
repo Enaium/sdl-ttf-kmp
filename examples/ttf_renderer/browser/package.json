@@ -1,0 +1,9 @@
+{
+  "name": "sdl-ttf-kmp-example-ttf-renderer-browser",
+  "private": true,
+  "type": "module",
+  "description": "Browser runner for the sdl-ttf-kmp ttf_renderer example",
+  "dependencies": {
+    "@enaium/sdl-ttf-kmp": "file:../../../sdl-ttf-kmp/build/npm"
+  }
+}

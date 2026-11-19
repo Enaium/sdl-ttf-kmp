@@ -5,5 +5,8 @@ plugins {
 
 allprojects {
     group = "cn.enaium.sdl"
-    version = "3.2.2.1"
+    // <kmp-module-version>-fixed.<pinned upstream version>. The KMP module
+    // version moves independently; the suffix records the SDL_ttf release it
+    // binds. Keep the suffix in sync with includes/SDL_ttf.
+    version = "1.0.1-fixed.3.2.2"
 }

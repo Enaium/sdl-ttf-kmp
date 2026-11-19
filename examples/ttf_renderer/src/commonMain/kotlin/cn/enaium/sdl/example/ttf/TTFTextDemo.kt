@@ -241,6 +241,19 @@ class TTFTextDemo(
             "SPACE toggles wrapping, W toggles whitespace visibility, C cycles the color, " +
             "click to inspect substrings."
 
+    /**
+     * Uploads [surface] into [texture]. SDLSurface.pixels requires a lock:
+     * the wasm implementation caches the pixels between lock and unlock.
+     */
+    private fun uploadSurface(surface: SDLSurface, texture: SDLTexture) {
+        check(surface.lock()) { "failed to lock surface: ${SDL.error()}" }
+        try {
+            texture.update(null, surface.pixels, surface.pitch)
+        } finally {
+            surface.unlock()
+        }
+    }
+
     private fun surfaceToTexture(surface: SDLSurface?): SDLTexture {
         checkNotNull(surface) { "text rendering failed: ${SDLTTF.error()}" }
         val texture = renderer.createTexture(
@@ -249,7 +262,7 @@ class TTFTextDemo(
             width = surface.width,
             height = surface.height,
         )
-        texture.update(null, surface.pixels, surface.pitch)
+        uploadSurface(surface, texture)
         // Text textures are downscaled (HiDPI/supersampling); linear
         // filtering keeps that smooth.
         texture.scaleMode = SDLScaleMode.LINEAR
@@ -367,9 +380,12 @@ class TTFTextDemo(
         bounceY += vy
         val w = window.size.x
         val h = window.size.y
-        if (bounceX < 0 || bounceX > w - 320) vx = -vx
+        // The animated string is wider than a fixed guess and changes size
+        // periodically; use its current width so it never clips at the edge.
+        val textW = (animated.size?.x ?: 320).toFloat()
+        if (bounceX < 0 || bounceX > w - textW) vx = -vx
         if (bounceY < 0 || bounceY > h - 60) vy = -vy
-        bounceX = bounceX.coerceIn(0f, (w - 320).coerceAtLeast(0).toFloat())
+        bounceX = bounceX.coerceIn(0f, (w - textW).coerceAtLeast(0f))
         bounceY = bounceY.coerceIn(0f, (h - 60).coerceAtLeast(0).toFloat())
 
         animated.color = palette[colorIndex]
@@ -408,10 +424,15 @@ class TTFTextDemo(
         renderer.renderTexture(shadedTexture, dst = SDLFRect(48f, 255f, shadedTexture.size.x / dpiScale, shadedTexture.size.y / dpiScale))
         renderer.renderTexture(lcdTexture, dst = SDLFRect(428f, 255f, lcdTexture.size.x / dpiScale, lcdTexture.size.y / dpiScale))
 
-        // Supersampling sample with a border.
+        // Supersampling sample with a border. The texture is rasterized at
+        // 4x (renderTextTexture(supersample = 4f)), so it is drawn at
+        // logical size to show the downscaled result.
+        val supersample = 4f
+        val supersampledW = supersampledTexture.size.x / (dpiScale * supersample)
+        val supersampledH = supersampledTexture.size.y / (dpiScale * supersample)
         renderer.drawColor = SDLColor(70, 70, 90)
-        renderer.drawRect(SDLRect(40, 330, 460, logicalHeight(supersampledTexture) + 10))
-        renderer.renderTexture(supersampledTexture, dst = SDLFRect(48f, 335f, supersampledTexture.size.x / dpiScale, supersampledTexture.size.y / dpiScale))
+        renderer.drawRect(SDLRect(40, 330, 460, supersampledH.toInt() + 10))
+        renderer.renderTexture(supersampledTexture, dst = SDLFRect(48f, 335f, supersampledW, supersampledH))
 
         // The CJK glyph rasterized at its display size (no upscaling).
         renderer.renderTexture(glyphTexture, dst = logicalRect(560f, 100f, glyphTexture))
@@ -427,7 +448,7 @@ class TTFTextDemo(
         canvas.fillRect(null, SDLColor(30, 30, 60))
         surfaceText.color = SDLColor(160, 220, 255)
         surfaceText.drawOnSurface((8f * dpiScale).toInt(), (8f * dpiScale).toInt(), canvas)
-        canvasTexture.update(null, canvas.pixels, canvas.pitch)
+        uploadSurface(canvas, canvasTexture)
         renderer.renderTexture(canvasTexture, dst = SDLFRect(420f, 400f, 360f, 140f))
 
         // Bouncing animated text (renderer engine).

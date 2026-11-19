@@ -355,7 +355,9 @@ interface SDLTTFText : AutoCloseable {
  * On the JVM the bindings delegate to libsdl_ttf_jni, a self-contained JNI
  * shared library whose SDL3 symbols are resolved at runtime from sdl-kmp's
  * libsdl_jni; on native platforms they delegate to the SDL_ttf static library
- * embedded in the published klib (see the ttf.def cinterop file).
+ * embedded in the published klib (see the ttf.def cinterop file); on wasmJs
+ * they delegate to the handle-based shim in the combined SDL3 + SDL_ttf
+ * Emscripten module shipped in the @enaium/sdl-ttf-kmp npm package.
  */
 expect object SDLTTF {
 

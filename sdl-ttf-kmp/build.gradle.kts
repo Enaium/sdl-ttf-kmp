@@ -145,6 +145,15 @@ kotlin {
 
     mingwX64()
 
+    // ==================== Wasm ====================
+    // SDL3 and SDL_ttf are compiled to a single Emscripten module (see the
+    // wasm/ directory); Kotlin/Wasm has no cinterop, so the wasmJs actuals
+    // call flat shim functions through the JS glue shipped as the
+    // @enaium/sdl-ttf-kmp npm package.
+    wasmJs {
+        browser()
+    }
+
     iosArm64()
     iosX64()
     iosSimulatorArm64()
@@ -231,7 +240,23 @@ kotlin {
                 runtimeOnly(libs.junit.platform.launcher)
             }
         }
+
+        wasmJsMain {
+            dependencies {
+                // Typed arrays (Int32Array, Int8Array) used by the JS bridge.
+                implementation(libs.kotlinx.browser)
+            }
+        }
     }
+}
+
+// Kotlin/Wasm tests would run the test entry before the Emscripten module
+// exists: every wasmJs actual calls globals that initSdlTtfKmp() installs from
+// the host page, which the Karma harness cannot inject. The browser example
+// (:examples:ttf_renderer:browser, run headless under Node in CI) is the
+// end-to-end wasm test instead.
+tasks.matching { it.name == "wasmJsTest" || it.name == "wasmJsBrowserTest" }.configureEach {
+    enabled = false
 }
 
 // ==================== Native: build static SDL_ttf library for each target ====================
@@ -390,6 +415,236 @@ androidNdkPath()?.let { ndk ->
     registerNativeBuildTasks("androidNativeX86", androidFlags("x86", "android-24"))
 }
 
+// ==================== wasm: build the combined SDL3 + SDL_ttf module ====================
+// Kotlin/Wasm has no cinterop and cannot embed C libraries. SDL3 and SDL_ttf
+// are therefore compiled to a single Emscripten module (sdl_wasm.js +
+// sdl_wasm.wasm) that the wasmJs actuals drive through a JS glue layer (see
+// src/wasmJsMain and the wasm/ directory).
+//
+// SDL3 must be part of the same module: the TTF-rendered SDL_Surface handles
+// are consumed by the sdl-kmp renderer/surface bindings, which operate on the
+// module's heap. The module also embeds sdl-kmp's SDL3 shim (vendored
+// unchanged from sdl-kmp's wasm/ directory) so the sdl-kmp wasmJs bindings
+// work against it as usual.
+
+val wasmDir = projectDir.resolve("wasm")
+val wasmOutDir = layout.buildDirectory.dir("wasm").get().asFile
+
+fun emsdkPath(): String {
+    System.getenv("EMSDK")?.takeIf { it.isNotBlank() }?.let { return it }
+    providers.gradleProperty("wasm.emsdk").orNull?.takeIf { it.isNotBlank() }?.let { return it }
+    val home = System.getProperty("user.home")
+    listOf(File(home, "emsdk"), File(home, "sdk/emsdk"))
+        .forEach { if (it.isDirectory()) return it.absolutePath }
+    return ""
+}
+
+val wasmEmsdk = emsdkPath()
+val wasmEmcc = File(wasmEmsdk, "upstream/emscripten/emcc")
+val wasmToolchain = File(wasmEmsdk, "upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake")
+
+// Emscripten requires Python >= 3.10; the emsdk ships its own interpreter,
+// which may not be on PATH (e.g. macOS ships Python 3.9 as /usr/bin/python3).
+fun wasmEnv(): Map<String, String> {
+    val pythonDir = File(wasmEmsdk, "python").listFiles()?.firstOrNull { it.isDirectory }
+    return if (pythonDir != null) {
+        mapOf("PATH" to "${pythonDir.absolutePath}/bin:${System.getenv("PATH")}")
+    } else {
+        emptyMap()
+    }
+}
+
+tasks.register<Exec>("configureWasmTtf") {
+    onlyIf { wasmEmsdk.isNotEmpty() }
+    doFirst {
+        File(wasmOutDir, "cmake").mkdirs()
+        wasmOutDir.mkdirs()
+    }
+    workingDir = File(wasmOutDir, "cmake")
+    environment(wasmEnv())
+    // A toolchain file disables the generator's normal make discovery, so the
+    // make program must be passed explicitly (emcmake does the same).
+    val makeProgram = if (hostOs.isWindows) "nmake" else "/usr/bin/make"
+    commandLine(
+        cmakeExecutable, wasmDir.absolutePath,
+        "-DCMAKE_BUILD_TYPE=Release",
+        "-DCMAKE_TOOLCHAIN_FILE=${wasmToolchain.absolutePath}",
+        "-DCMAKE_MAKE_PROGRAM=$makeProgram",
+        "-DSDL_SOURCE_DIR=${sdlDir.absolutePath}",
+        "-DSDLTTF_SOURCE_DIR=${ttfDir.absolutePath}",
+        "-DWASM_OUTPUT_DIR=${wasmOutDir.absolutePath}",
+    )
+}
+
+tasks.register<Exec>("buildWasmTtf") {
+    onlyIf { wasmEmsdk.isNotEmpty() }
+    dependsOn("configureWasmTtf")
+    workingDir = File(wasmOutDir, "cmake")
+    environment(wasmEnv())
+    commandLine(cmakeExecutable, "--build", ".", "--config", "Release")
+}
+
+tasks.register<Exec>("linkWasmTtf") {
+    onlyIf { wasmEmsdk.isNotEmpty() }
+    dependsOn("buildWasmTtf")
+    workingDir = wasmDir
+    environment(wasmEnv())
+    doFirst {
+        wasmOutDir.mkdirs()
+        // Export every sdl_kmp_* / sdl_ttf_kmp_* shim function. The prefix
+        // alternation keeps sdl-kmp's and sdl-ttf-kmp's shims in one module.
+        val exports = listOf(
+            wasmDir.resolve("sdl_wasm_shim.c"),
+            wasmDir.resolve("ttf_wasm_shim.c"),
+        ).flatMap { file ->
+            Regex("(?:sdl_kmp|sdl_ttf_kmp)_\\w+(?=\\()")
+                .findAll(file.readText())
+                .map { it.value }
+                .toList()
+        }.distinct().joinToString(",") { "_$it" }
+        commandLine(
+            wasmEmcc.absolutePath,
+            wasmDir.resolve("sdl_wasm_shim.c").absolutePath,
+            wasmDir.resolve("ttf_wasm_shim.c").absolutePath,
+            File(wasmOutDir, "libSDL3_ttf.a").absolutePath,
+            File(wasmOutDir, "libSDL3.a").absolutePath,
+            "-I${sdlDir.absolutePath}/include",
+            "-I${ttfDir.absolutePath}/include",
+            "-o", File(wasmOutDir, "sdl_wasm.js").absolutePath,
+            "-sMODULARIZE=1", "-sEXPORT_NAME=SDLModule", "-sEXPORT_ES6=1",
+            "-sEXPORTED_FUNCTIONS=$exports,_malloc,_free",
+            "-sEXPORTED_RUNTIME_METHODS=ccall,cwrap,UTF8ToString,stringToUTF8,lengthBytesUTF8,HEAPU8,HEAP32,HEAPU32,HEAP16,HEAPU16,HEAPF32,HEAPF64,HEAP8,FS,requestFullscreen",
+            "-sALLOW_MEMORY_GROWTH=1", "-sINITIAL_MEMORY=67108864",
+            "-sENVIRONMENT=web,worker,node", "-sFILESYSTEM=1", "-sMAX_WEBGL_VERSION=2", "--no-entry",
+            "--js-library", wasmDir.resolve("emscripten_overrides.js").absolutePath,
+        )
+    }
+    inputs.file(wasmDir.resolve("sdl_wasm_shim.c"))
+    inputs.file(wasmDir.resolve("ttf_wasm_shim.c"))
+    inputs.file(wasmDir.resolve("emscripten_overrides.js"))
+    inputs.file(wasmDir.resolve("CMakeLists.txt"))
+    // The archives are produced by buildWasmTtf; register them so changes in
+    // SDL3/SDL_ttf re-link the module instead of keeping a stale one.
+    inputs.file(File(wasmOutDir, "libSDL3.a"))
+    inputs.file(File(wasmOutDir, "libSDL3_ttf.a"))
+    outputs.file(File(wasmOutDir, "sdl_wasm.js"))
+    outputs.file(File(wasmOutDir, "sdl_wasm.wasm"))
+}
+
+// ==================== wasm: npm package ====================
+// The combined Emscripten module and the JS glue ship as an npm package
+// (@enaium/sdl-ttf-kmp) instead of a Maven "assets" jar: web apps depend on
+// it like any other npm package and `import { initSdlTtfKmp } from
+// "@enaium/sdl-ttf-kmp"` before running the Kotlin/Wasm module, so no asset
+// extraction step is involved.
+//
+// The package embeds sdl-kmp's SDL3 glue (sdl_kmp_glue.js, vendored from
+// sdl-kmp) because the combined module replaces @enaium/sdl-kmp's SDL-only
+// module: one Emscripten heap is required for TTF surfaces to interoperate
+// with sdl-kmp's renderer/surface APIs. Apps using sdl-ttf-kmp on the web
+// must initialize with initSdlTtfKmp instead of sdl-kmp's initSdlKmp.
+//
+// The package version is the Gradle version itself:
+//   <kmp-module-version>-fixed.<SDL_ttf version>   (e.g. 1.0.0-fixed.3.2.2)
+// which is valid npm semver, so Maven and npm publish the same coordinate
+// string.
+
+val ttfVersion: String by lazy {
+    val header = ttfDir.resolve("include/SDL3_ttf/SDL_ttf.h").readText()
+    fun macro(name: String): String =
+        Regex("""#define\s+$name\s+(\d+)""").find(header)?.groupValues?.get(1)
+            ?: error("$name is missing from SDL_ttf.h")
+    "${macro("SDL_TTF_MAJOR_VERSION")}.${macro("SDL_TTF_MINOR_VERSION")}.${macro("SDL_TTF_MICRO_VERSION")}"
+}
+
+val npmPackageVersion: String by lazy {
+    val version = rootProject.version.toString()
+    val expectedSuffix = "-fixed.$ttfVersion"
+    check(version.endsWith(expectedSuffix)) {
+        "Gradle version '$version' must end with '$expectedSuffix' " +
+            "(SDL_ttf.h reports $ttfVersion); update allprojects.version"
+    }
+    version
+}
+
+val wasmNpmDir = layout.buildDirectory.dir("npm").get().asFile
+
+tasks.register("assembleWasmNpm") {
+    group = "build"
+    description = "Stages the @enaium/sdl-ttf-kmp npm package in build/npm."
+    dependsOn("linkWasmTtf")
+    inputs.file(wasmDir.resolve("ttf_kmp_glue.js"))
+    inputs.file(wasmDir.resolve("sdl_kmp_glue.js"))
+    // The version comes from this header and the Gradle version, so either
+    // bump must re-stage.
+    inputs.file(ttfDir.resolve("include/SDL3_ttf/SDL_ttf.h"))
+    inputs.property("npmPackageVersion", npmPackageVersion)
+    inputs.file(File(wasmOutDir, "sdl_wasm.js"))
+    inputs.file(File(wasmOutDir, "sdl_wasm.wasm"))
+    outputs.dir(wasmNpmDir)
+    doLast {
+        wasmNpmDir.deleteRecursively()
+        wasmNpmDir.mkdirs()
+        wasmDir.resolve("ttf_kmp_glue.js").copyTo(wasmNpmDir.resolve("ttf_kmp_glue.js"), overwrite = true)
+        wasmDir.resolve("sdl_kmp_glue.js").copyTo(wasmNpmDir.resolve("sdl_kmp_glue.js"), overwrite = true)
+        File(wasmOutDir, "sdl_wasm.js").copyTo(wasmNpmDir.resolve("sdl_wasm.js"), overwrite = true)
+        File(wasmOutDir, "sdl_wasm.wasm").copyTo(wasmNpmDir.resolve("sdl_wasm.wasm"), overwrite = true)
+        wasmNpmDir.resolve("package.json").writeText(
+            """
+            {
+              "name": "@enaium/sdl-ttf-kmp",
+              "version": "$npmPackageVersion",
+              "description": "Emscripten-compiled SDL3 + SDL_ttf module and JS glue for the sdl-ttf-kmp wasmJs target",
+              "license": "Zlib",
+              "type": "module",
+              "exports": {
+                ".": "./ttf_kmp_glue.js",
+                "./sdl_kmp_glue.js": "./sdl_kmp_glue.js",
+                "./sdl_wasm.js": "./sdl_wasm.js",
+                "./package.json": "./package.json"
+              },
+              "files": ["ttf_kmp_glue.js", "sdl_kmp_glue.js", "sdl_wasm.js", "sdl_wasm.wasm"],
+              "homepage": "https://github.com/Enaium/sdl-ttf-kmp",
+              "repository": {
+                "type": "git",
+                "url": "git+https://github.com/Enaium/sdl-ttf-kmp.git"
+              }
+            }
+            """.trimIndent() + "\n",
+        )
+    }
+}
+
+tasks.register<Exec>("publishWasmNpm") {
+    group = "publishing"
+    description = "Publishes @enaium/sdl-ttf-kmp to npm (token: npm.publish.key)."
+    dependsOn("assembleWasmNpm")
+    workingDir = wasmNpmDir
+    // The token lives in the user-level Gradle properties file
+    // (~/.gradle/gradle.properties, next to mavenCentralUsername and the
+    // signing.* entries); CI writes the same key there from a repository
+    // secret. `-Pnpm.publish.key=<token>` overrides it for one-off runs.
+    val npmKey = providers.gradleProperty("npm.publish.key")
+    doFirst {
+        val key = npmKey.orNull?.takeIf { it.isNotBlank() }
+            ?: throw GradleException(
+                "npm.publish.key is not set: add it to ~/.gradle/gradle.properties " +
+                    "or pass -Pnpm.publish.key=<token>",
+            )
+        // NODE_AUTH_TOKEN is expanded by npm through the environment, so the
+        // token never lands in the package.json/tarball; .npmrc is on npm's
+        // never-publish list anyway.
+        environment("NODE_AUTH_TOKEN", key)
+        wasmNpmDir.resolve(".npmrc").writeText(
+            "//registry.npmjs.org/:_authToken=\${NODE_AUTH_TOKEN}\n",
+        )
+    }
+    // The version is a semver prerelease (module version +
+    // -fixed.<upstream>), so npm requires an explicit tag; `latest` keeps
+    // `npm i @enaium/sdl-ttf-kmp` working.
+    commandLine("npm", "publish", "--access", "public", "--tag", "latest")
+}
+
 // ==================== Publishing ====================
 mavenPublishing {
     publishToMavenCentral(automaticRelease = true)
@@ -408,7 +663,9 @@ mavenPublishing {
             "Kotlin Multiplatform bindings for SDL_ttf, built on top of sdl-kmp. " +
                     "JVM uses a self-contained JNI shared library that resolves its SDL3 " +
                     "symbols from sdl-kmp's libsdl_jni; native targets embed the statically " +
-                    "compiled SDL_ttf library into the published klib.",
+                    "compiled SDL_ttf library into the published klib; wasmJs drives a " +
+                    "combined SDL3 + SDL_ttf Emscripten module shipped as the " +
+                    "@enaium/sdl-ttf-kmp npm package.",
         )
         url.set("https://github.com/Enaium/sdl-ttf-kmp")
         inceptionYear.set("2026")

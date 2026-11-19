@@ -7,7 +7,7 @@ name: Publish
 # coordinates are immutable, so each publication is produced by exactly one
 # runner:
 #
-#   macos-14      -> :sdl-ttf-kmp metadata + jvm + all Apple target klibs
+#   macos-latest  -> :sdl-ttf-kmp metadata + jvm + all Apple target klibs
 #                    (macos/ios/tvos, each with the embedded SDL_ttf static
 #                    library built on this runner) + the
 #                    sdl-ttf-kmp-jni-jvm-darwin-{aarch64,x86_64} artifacts
@@ -41,7 +41,7 @@ name: Publish
 jobs:
   publish-macos:
     name: Publish macOS (metadata + jvm + Apple klibs)
-    runs-on: macos-14
+    runs-on: macos-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@v6

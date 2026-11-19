@@ -196,6 +196,10 @@ SDL_VIDEO_DRIVER=dummy ./gradlew :examples:ttf_renderer:jvmRun
 # build the wasm module + npm package, then the browser example
 ./gradlew :sdl-ttf-kmp:assembleWasmNpm :examples:ttf_renderer:browser:copyWebAssets
 
+# publish the npm package from this machine (token: npm.publish.key in
+# ~/.gradle/gradle.properties, or -Pnpm.publish.key=<token>)
+./gradlew :sdl-ttf-kmp:publishWasmNpm
+
 # publish everything buildable on this host to Maven Local
 ./gradlew :sdl-ttf-kmp:publishToMavenLocal :ttf-jni-jvm-darwin-aarch64:publishToMavenLocal
 ```
@@ -205,7 +209,7 @@ SDL_VIDEO_DRIVER=dummy ./gradlew :examples:ttf_renderer:jvmRun
 Both workflows are **manually triggered** (Actions tab):
 
 - **`test.yml`** — local Maven publish + test: publishes every artifact the runner can build to Maven Local (no signing, no secrets), runs the JVM/native tests, the headless example, and the wasm pipeline (Emscripten module, npm package, browser example under Node). Use this to verify a change before publishing.
-- **`publish.yml`** — formal release: publishes the metadata + JVM module, all target klibs (including `wasmJs`) and the JNI artifacts to Maven Central, signed with PGP, then publishes the `@enaium/sdl-ttf-kmp` npm package. The version is the one in `build.gradle.kts`. Requires the repository secrets `MAVEN_CENTRAL_USERNAME`, `MAVEN_CENTRAL_PASSWORD`, `SIGNING_KEY`, `SIGNING_KEY_ID`, `SIGNING_PASSWORD` and `NPM_PUBLISH_KEY` (npm automation token).
+- **`publish.yml`** — formal Maven Central release: publishes the metadata + JVM module, all target klibs (including `wasmJs`) and the JNI artifacts, signed with PGP. The version is the one in `build.gradle.kts`. Requires the repository secrets `MAVEN_CENTRAL_USERNAME`, `MAVEN_CENTRAL_PASSWORD`, `SIGNING_KEY`, `SIGNING_KEY_ID` and `SIGNING_PASSWORD`. The npm package is **not** published by CI; publish it from the workstation with `:sdl-ttf-kmp:publishWasmNpm` (see below).
 
 ## License
 

@@ -18,11 +18,10 @@ name: Publish
 #   ubuntu-latest -> :sdl-ttf-kmp androidNative klibs (arm64/arm32/x64/x86,
 #                    with the embedded static library built via the Android
 #                    NDK)
-#   ubuntu-latest -> :sdl-ttf-kmp wasmJs klib + the @enaium/sdl-ttf-kmp npm
-#                    package (Emscripten-compiled SDL3 + SDL_ttf module
-#                    sdl_wasm.js/.wasm + the JS glue; the wasmJs target has no
-#                    cinterop, so this is a separate job from the JVM/native
-#                    artifacts)
+#   ubuntu-latest -> :sdl-ttf-kmp wasmJs klib (the Emscripten-compiled SDL3 +
+#                    SDL_ttf module and JS glue ship as the npm package, which
+#                    is published separately from a workstation with
+#                    :sdl-ttf-kmp:publishWasmNpm)
 #   windows-latest -> sdl-ttf-kmp-jni-jvm-windows-x86_64 (native MinGW build)
 #
 # The kotlinMultiplatform metadata module (published from macOS) redirects to
@@ -38,9 +37,6 @@ name: Publish
 #   SIGNING_KEY              base64-encoded PGP secret key ring (.gpg, binary)
 #   SIGNING_KEY_ID           8-hex-digit key id (without the 0x prefix)
 #   SIGNING_PASSWORD         Passphrase of the signing key
-#   NPM_PUBLISH_KEY          optional npm automation token for
-#                            @enaium/sdl-ttf-kmp; when unset, the npm step is
-#                            skipped and the package is published locally
 
 jobs:
   publish-macos:
@@ -203,8 +199,8 @@ jobs:
           ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
           ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
 
-  publish-wasm-npm:
-    name: Publish wasmJs klib + npm package
+  publish-wasm:
+    name: Publish wasmJs klib
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -249,17 +245,6 @@ jobs:
         env:
           ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
           ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
-
-      - name: Publish the @enaium/sdl-ttf-kmp npm package
-        # The secret is optional: without it the step is skipped and the
-        # package can be published from a workstation with publishWasmNpm.
-        if: env.NPM_PUBLISH_KEY != ''
-        run: |
-          install -d "$HOME/.gradle"
-          printf 'npm.publish.key=%s\n' "$NPM_PUBLISH_KEY" >> "$HOME/.gradle/gradle.properties"
-          ./gradlew --no-daemon --stacktrace -Pwasm.emsdk="$HOME/emsdk" :sdl-ttf-kmp:publishWasmNpm
-        env:
-          NPM_PUBLISH_KEY: ${{ secrets.NPM_PUBLISH_KEY }}
 
   publish-windows:
     name: Publish Windows (windows-x86_64 JNI artifact)

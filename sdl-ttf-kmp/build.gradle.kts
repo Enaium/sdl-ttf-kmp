@@ -620,10 +620,10 @@ tasks.register<Exec>("publishWasmNpm") {
     description = "Publishes @enaium/sdl-ttf-kmp to npm (token: npm.publish.key)."
     dependsOn("assembleWasmNpm")
     workingDir = wasmNpmDir
-    // The token lives in the user-level Gradle properties file
-    // (~/.gradle/gradle.properties, next to mavenCentralUsername and the
-    // signing.* entries); CI writes the same key there from a repository
-    // secret. `-Pnpm.publish.key=<token>` overrides it for one-off runs.
+    // npm is published from a workstation, not by CI (the publish workflow
+    // only handles Maven Central). The token lives in the user-level Gradle
+    // properties file (~/.gradle/gradle.properties); `-Pnpm.publish.key=<token>`
+    // overrides it for one-off runs.
     val npmKey = providers.gradleProperty("npm.publish.key")
     doFirst {
         val key = npmKey.orNull?.takeIf { it.isNotBlank() }
